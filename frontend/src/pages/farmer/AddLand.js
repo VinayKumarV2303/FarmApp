@@ -17,18 +17,13 @@ const AddLand = () => {
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
-    village: "",
-    district: "",
-    state: "",
     land_area: "",
   });
 
-  // dropdown data
   const [states, setStates] = useState([]);
   const [districts, setDistricts] = useState([]);
   const [villages, setVillages] = useState([]);
 
-  // selected objects
   const [selectedState, setSelectedState] = useState(null);
   const [selectedDistrict, setSelectedDistrict] = useState(null);
   const [selectedVillage, setSelectedVillage] = useState(null);
@@ -36,21 +31,20 @@ const AddLand = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // ─── Load states on mount ────────────────────────────────────────────────
+  // Fetch states on load
   useEffect(() => {
     const fetchStates = async () => {
       try {
-        const res = await api.get("/locations/states/"); // <-- adjust if needed
+        const res = await api.get("/locations/states/");
         setStates(res.data || []);
       } catch (err) {
         console.error("Error fetching states:", err);
-        setError("Could not load states. Please try again.");
+        setError("Could not load states. Try again.");
       }
     };
     fetchStates();
   }, []);
 
-  // ─── When state changes, load districts ──────────────────────────────────
   const handleStateChange = async (_, newState) => {
     setError("");
     setSelectedState(newState);
@@ -59,60 +53,37 @@ const AddLand = () => {
     setDistricts([]);
     setVillages([]);
 
-    setFormData((prev) => ({
-      ...prev,
-      state: newState?.name || "",
-      district: "",
-      village: "",
-    }));
-
     if (!newState) return;
 
     try {
-      const res = await api.get(
-        `/locations/districts/?state=${newState.id}` // <-- adjust
-      );
+      const res = await api.get(`/locations/districts/?state=${newState.id}`);
       setDistricts(res.data || []);
     } catch (err) {
       console.error("Error fetching districts:", err);
-      setError("Could not load districts for this state.");
+      setError("Could not load districts.");
     }
   };
 
-  // ─── When district changes, load villages ────────────────────────────────
   const handleDistrictChange = async (_, newDistrict) => {
     setError("");
     setSelectedDistrict(newDistrict);
     setSelectedVillage(null);
     setVillages([]);
 
-    setFormData((prev) => ({
-      ...prev,
-      district: newDistrict?.name || "",
-      village: "",
-    }));
-
     if (!newDistrict) return;
 
     try {
-      const res = await api.get(
-        `/locations/villages/?district=${newDistrict.id}` // <-- adjust
-      );
+      const res = await api.get(`/locations/villages/?district=${newDistrict.id}`);
       setVillages(res.data || []);
     } catch (err) {
       console.error("Error fetching villages:", err);
-      setError("Could not load villages for this district.");
+      setError("Could not load villages.");
     }
   };
 
-  // ─── When village changes ────────────────────────────────────────────────
   const handleVillageChange = (_, newVillage) => {
     setError("");
     setSelectedVillage(newVillage);
-    setFormData((prev) => ({
-      ...prev,
-      village: newVillage?.name || "",
-    }));
   };
 
   const handleFieldChange = (e) => {
@@ -128,21 +99,33 @@ const AddLand = () => {
     setSaving(true);
     setError("");
 
+    // Basic validation
+    if (!selectedState || !selectedDistrict || !selectedVillage) {
+      setError("Please select State, District and Village.");
+      setSaving(false);
+      return;
+    }
+
     try {
+      // ✅ Land model stores text, so send NAMES, not IDs
       const payload = {
-        village: formData.village,
-        district: formData.district,
-        state: formData.state,
-        land_area: formData.land_area
-          ? parseFloat(formData.land_area)
-          : null,
+        state: selectedState.name,
+        district: selectedDistrict.name,
+        village: selectedVillage.name,
+        land_area: formData.land_area ? parseFloat(formData.land_area) : null,
       };
 
+      console.log("🚜 Add Land payload:", payload);
+
       await api.post("/farmer/land/", payload);
+
       navigate("/farmer/land");
     } catch (err) {
-      console.error("Add land error:", err);
-      setError("Failed to add land.");
+      console.error("Add land error:", err.response?.data || err);
+      setError(
+        (err.response && JSON.stringify(err.response.data)) ||
+          "Failed to add land."
+      );
     } finally {
       setSaving(false);
     }
@@ -166,23 +149,16 @@ const AddLand = () => {
               <Stack spacing={2}>
                 {error && <Alert severity="error">{error}</Alert>}
 
-                {/* State */}
                 <Autocomplete
                   options={states}
                   getOptionLabel={(option) => option.name || ""}
                   value={selectedState}
                   onChange={handleStateChange}
                   renderInput={(params) => (
-                    <TextField
-                      {...params}
-                      label="State"
-                      required
-                      fullWidth
-                    />
+                    <TextField {...params} label="State" required fullWidth />
                   )}
                 />
 
-                {/* District */}
                 <Autocomplete
                   options={districts}
                   getOptionLabel={(option) => option.name || ""}
@@ -199,7 +175,6 @@ const AddLand = () => {
                   )}
                 />
 
-                {/* Village */}
                 <Autocomplete
                   options={villages}
                   getOptionLabel={(option) => option.name || ""}
@@ -216,7 +191,6 @@ const AddLand = () => {
                   )}
                 />
 
-                {/* Land area */}
                 <TextField
                   label="Land Area (Acres)"
                   name="land_area"

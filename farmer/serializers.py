@@ -21,7 +21,10 @@ class FarmerProfileSerializer(serializers.ModelSerializer):
 class LandSerializer(serializers.ModelSerializer):
     class Meta:
         model = Land
+        # Keep all fields so approvals & admin side keep working
         fields = "__all__"
+        # Only these should not be set from API payload
+        read_only_fields = ("id", "farmer")
 
 
 class NewsSerializer(serializers.ModelSerializer):
@@ -54,11 +57,17 @@ class CropAllocationSerializer(serializers.ModelSerializer):
             "expected_harvest_date",
             "expected_yield_per_acre",
         ]
+        extra_kwargs = {
+            "seed_variety": {
+                "required": False,
+                "allow_null": True,
+                "allow_blank": True,
+            }
+        }
 
 
 class CropPlanSerializer(serializers.ModelSerializer):
-    # nested crop allocations
-    crops = CropAllocationSerializer(many=True)
+    crops = CropAllocationSerializer(many=True, read_only=True)
 
     class Meta:
         model = CropPlan
@@ -71,30 +80,36 @@ class CropPlanSerializer(serializers.ModelSerializer):
             "notes",
             "total_acres_allocated",
             "crops",
+            "approval_status",
+            "admin_remark",
             "created_at",
             "updated_at",
         ]
         read_only_fields = [
             "id",
+            "land",
+            "approval_status",
+            "admin_remark",
             "created_at",
             "updated_at",
-            "land",
         ]
 
+
     def create(self, validated_data):
-        """
-        Creates CropPlan + nested CropAllocation records.
-        Farmer comes from request.user.farmer, land is passed from view via
-        serializer.save(land=land).
-        """
-        request = self.context.get("request")
-        farmer = None
-        if request and hasattr(request, "user") and hasattr(request.user, "farmer"):
-            farmer = request.user.farmer
-
         crops_data = validated_data.pop("crops", [])
-        crop_plan = CropPlan.objects.create(farmer=farmer, **validated_data)
 
+        # Retrieve farmer & land passed from view via serializer.save()
+        farmer = validated_data.pop("farmer", None)
+        land = validated_data.pop("land", None)
+
+        # Create main crop plan
+        crop_plan = CropPlan.objects.create(
+            farmer=farmer,
+            land=land,
+            **validated_data
+        )
+
+        # Create nested crop allocation rows
         for crop in crops_data:
             CropAllocation.objects.create(crop_plan=crop_plan, **crop)
 

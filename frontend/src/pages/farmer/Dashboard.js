@@ -102,7 +102,6 @@ const FarmerDashboard = () => {
 
   return (
     <Box>
-      {/* Title */}
       <Stack
         direction="row"
         alignItems="center"
@@ -121,7 +120,6 @@ const FarmerDashboard = () => {
           </span>
         </Stack>
 
-        {/* Optional small subtitle */}
         <Typography
           variant="caption"
           color="text.secondary"
@@ -131,7 +129,6 @@ const FarmerDashboard = () => {
         </Typography>
       </Stack>
 
-      {/* Feed */}
       {loading ? (
         <NewsSkeleton />
       ) : error ? (
@@ -158,6 +155,11 @@ const FarmerDashboard = () => {
             if (item.author_name) metaParts.push(item.author_name);
             if (item.is_important) metaParts.push("IMPORTANT");
             const metaLine = metaParts.join(" • ");
+
+            // ---- SAFE TAG HANDLER ----
+            const tags = Array.isArray(item.tags)
+              ? item.tags
+              : item.tags?.toString().split(",") || [];
 
             const CardWrapper = ({ children }) =>
               item.url ? (
@@ -217,16 +219,16 @@ const FarmerDashboard = () => {
                           : "")}
                     </Typography>
 
-                    {item.tags && item.tags.length > 0 && (
+                    {tags.length > 0 && (
                       <Stack
                         direction="row"
                         spacing={1}
                         flexWrap="wrap"
                         sx={{ mb: 1 }}
                       >
-                        {item.tags.map((tag) => (
+                        {tags.map((tag, index) => (
                           <Chip
-                            key={tag}
+                            key={index}
                             label={`#${tag}`}
                             size="small"
                             sx={{

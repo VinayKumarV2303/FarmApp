@@ -1,5 +1,7 @@
 from django.urls import path
 from . import views
+from .views import approve_crop_plan, reject_crop_plan
+from .views import yield_estimate_view
 
 urlpatterns = [
     path("send-otp/", views.send_otp_view, name="send-otp"),
@@ -16,6 +18,8 @@ urlpatterns = [
         views.CropPlanDetailView.as_view(),
         name="crop-plan-detail",
     ),
-
+    path("crop-plan/<int:pk>/approve/", approve_crop_plan),
+    path("crop-plan/<int:pk>/reject/", reject_crop_plan),
     path("news/", views.news_list_view, name="farmer-news"),
+    path("yield-estimate/", yield_estimate_view, name="yield-estimate"),
 ]

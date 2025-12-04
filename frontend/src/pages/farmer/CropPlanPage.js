@@ -1,4 +1,5 @@
 // src/pages/farmer/CropPlanPage.js
+
 import React, { useState, useMemo, useEffect } from "react";
 import {
   Box,
@@ -11,25 +12,70 @@ import {
   MenuItem,
   Stack,
   Button,
-  Chip,
   Divider,
 } from "@mui/material";
 import AddCircleOutlineIcon from "@mui/icons-material/AddCircleOutline";
 import DeleteIcon from "@mui/icons-material/Delete";
 import { useNavigate } from "react-router-dom";
-import api from "../../api/axios"; // shared axios instance
+import api from "../../api/axios";
+
+// =======================
+// 🔹 Crop Master (Kolar)
+// =======================
 
 const CROP_OPTIONS = [
-  "Wheat",
-  "Rice",
+  // Field crops
+  "Ragi",
+  "Paddy",
   "Maize",
-  "Cotton",
-  "Sugarcane",
-  "Pulses",
+  "Tur",
+  "Horse Gram",
+  "Cowpea",
   "Groundnut",
-  "Mustard",
-  "Vegetables Mix",
+  "Pulses",
+  "Sugarcane",
+  // Vegetables
+  "Tomato",
+  "Potato",
+  "Onion",
+  "Beans",
+  "Cabbage",
+  "Cauliflower",
+  "Brinjal",
+  "Chilli",
+  "Carrot",
+  "Radish",
+  "Capsicum",
+  "Leafy Vegetables",
 ];
+
+// Approximate days from sowing → harvest per crop (Kolar-like conditions)
+const HARVEST_DAYS = {
+  // Field crops
+  Ragi: 120,
+  Paddy: 120,
+  Maize: 110,
+  Tur: 160,
+  "Horse Gram": 100,
+  Cowpea: 90,
+  Groundnut: 110,
+  Pulses: 90,
+  Sugarcane: 365,
+
+  // Vegetables
+  Tomato: 120,
+  Potato: 110,
+  Onion: 120,
+  Beans: 75,
+  Cabbage: 90,
+  Cauliflower: 100,
+  Brinjal: 130,
+  Chilli: 180,
+  Carrot: 110,
+  Radish: 60,
+  Capsicum: 140,
+  "Leafy Vegetables": 45,
+};
 
 const SOIL_TYPES = [
   "Alluvial",
@@ -44,7 +90,6 @@ const SOIL_TYPES = [
 
 const IRRIGATION_TYPES = ["Rainfed", "Canal", "Tube well", "Drip", "Sprinkler"];
 
-// UI-friendly labels for farmers
 const SEASONS = [
   "Kharif (Monsoon)",
   "Rabi (Winter)",
@@ -52,235 +97,197 @@ const SEASONS = [
   "Perennial (All Year)",
 ];
 
-// Base yields per acre (dummy example values – adjust as needed)
-const BASE_YIELD_PER_ACRE = {
-  Wheat: 20,
-  Rice: 25,
-  Maize: 18,
-  Cotton: 10,
-  Sugarcane: 40,
-  Pulses: 8,
-  Groundnut: 12,
-  Mustard: 10,
-  "Vegetables Mix": 15,
-};
-
-const SOIL_MULTIPLIER = {
-  Alluvial: 1.1,
-  Black: 1.05,
-  Red: 0.95,
-  Laterite: 0.9,
-  Desert: 0.7,
-  Mountain: 0.85,
-  "Sandy Loam": 1.0,
-  "Clay Loam": 1.0,
-};
-
-const IRRIGATION_MULTIPLIER = {
-  Drip: 1.15,
-  Sprinkler: 1.1,
-  Canal: 1.0,
-  "Tube well": 1.0,
-  Rainfed: 0.85,
-};
-
-// Use simple season keys internally
-const SEASON_MULTIPLIER = {
-  Kharif: 1.0,
-  Rabi: 1.05,
-  Zaid: 0.95,
-  Perennial: 1.0,
-};
-
-// Approx days from sowing to harvest by crop (rough)
-const CROP_DURATION_DAYS = {
-  Wheat: 120,
-  Rice: 120,
-  Maize: 100,
-  Cotton: 180,
-  Sugarcane: 300,
-  Pulses: 90,
-  Groundnut: 110,
-  Mustard: 120,
-  "Vegetables Mix": 70,
-};
-
 const EMPTY_ROW = {
   crop: "",
   acres: "",
   seedVariety: "",
   sowingDate: "",
+  expectedHarvestDate: "",
+  expectedYield: "",
 };
 
-function normalizeSeasonKey(seasonLabel) {
-  if (!seasonLabel) return null;
-  if (seasonLabel.startsWith("Kharif")) return "Kharif";
-  if (seasonLabel.startsWith("Rabi")) return "Rabi";
-  if (seasonLabel.startsWith("Zaid")) return "Zaid";
-  if (seasonLabel.startsWith("Perennial")) return "Perennial";
-  return null;
-}
-
-function addDays(dateStr, days) {
-  if (!dateStr) return "";
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return "";
-  d.setDate(d.getDate() + days);
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
+// helper to format JS Date -> yyyy-mm-dd
+const formatDate = (date) => {
+  if (!date) return "";
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
-}
+};
+
+// compute harvest date only (yield now comes from backend)
+const computeHarvestDate = (row) => {
+  const crop = row.crop;
+  const sowingDate = row.sowingDate;
+  let expectedHarvestDate = "";
+
+  if (crop && sowingDate) {
+    const days = HARVEST_DAYS[crop] || 100;
+    const base = new Date(sowingDate);
+    if (!isNaN(base.getTime())) {
+      base.setDate(base.getDate() + days);
+      expectedHarvestDate = formatDate(base);
+    }
+  }
+
+  return expectedHarvestDate;
+};
 
 export default function CropPlanPage() {
   const navigate = useNavigate();
 
-  // Land state
   const [lands, setLands] = useState([]);
+  const [plans, setPlans] = useState([]);
   const [selectedLandId, setSelectedLandId] = useState("");
-  const [landsLoading, setLandsLoading] = useState(false);
-
-  // Plan-level state
+  const [rows, setRows] = useState([EMPTY_ROW]);
   const [soilType, setSoilType] = useState("");
   const [season, setSeason] = useState("");
   const [irrigationType, setIrrigationType] = useState("");
   const [notes, setNotes] = useState("");
-
-  // Dynamic crop rows
-  const [rows, setRows] = useState([EMPTY_ROW]);
-
-  const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState({});
 
-  // 👉 selected land & its area
+  // Load only approved lands and existing plans
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const landRes = await api.get("/farmer/land/?only_approved=1");
+        const planRes = await api.get("/farmer/crop-plan/");
+        setLands(landRes.data || []);
+        setPlans(planRes.data || []);
+      } catch (e) {
+        console.error("Load failed", e);
+      }
+    };
+    loadData();
+  }, []);
+
   const selectedLand = useMemo(
     () => lands.find((l) => String(l.id) === String(selectedLandId)),
     [lands, selectedLandId]
   );
 
-  const landAreaAcres = useMemo(() => {
-    if (!selectedLand) return null;
+  const usedForThisLand = useMemo(() => {
+    if (!selectedLand) return 0;
+    return plans
+      .filter((p) => p.land === selectedLand.id)
+      .reduce((sum, p) => sum + Number(p.total_acres_allocated || 0), 0);
+  }, [plans, selectedLand]);
 
-    // SUPPORT multiple possible field names
-    const area =
-      selectedLand.land_area ??
-      selectedLand.area_acres ??
-      selectedLand.total_area_acres ??
-      selectedLand.area ??
-      selectedLand.acre ??
-      selectedLand.land_size ??
-      null;
+  const landAreaAcres = selectedLand?.land_area || 0;
 
-    return area != null ? Number(area) : null;
-  }, [selectedLand]);
-
-  // Total acres allocated
   const totalAllocatedAcres = useMemo(
-    () =>
-      rows.reduce((sum, row) => {
-        const val = parseFloat(row.acres);
-        return sum + (isNaN(val) ? 0 : val);
-      }, 0),
+    () => rows.reduce((sum, r) => sum + (Number(r.acres) || 0), 0),
     [rows]
   );
 
-  // Remaining acres (for display only)
-  const remainingAcres = useMemo(() => {
-    if (landAreaAcres == null) return null;
-    const rem = landAreaAcres - totalAllocatedAcres;
-    return Number(rem.toFixed(2));
-  }, [landAreaAcres, totalAllocatedAcres]);
+  const rawRemaining = landAreaAcres - usedForThisLand - totalAllocatedAcres;
+  const remainingForLand = Math.max(rawRemaining, 0);
+  const isOverAllocated = rawRemaining < 0;
 
-  // Helper to calculate expected yield per acre for a given crop row
-  const getExpectedYieldPerAcre = (cropName) => {
-    if (!cropName) return "";
-    const base =
-      BASE_YIELD_PER_ACRE[cropName] ?? BASE_YIELD_PER_ACRE["Vegetables Mix"];
-
-    const soilMul = SOIL_MULTIPLIER[soilType] ?? 1;
-    const irrMul = IRRIGATION_MULTIPLIER[irrigationType] ?? 1;
-    const seasonKey = normalizeSeasonKey(season);
-    const seasonMul = SEASON_MULTIPLIER[seasonKey] ?? 1;
-
-    const result = base * soilMul * irrMul * seasonMul;
-    if (!result || isNaN(result)) return "";
-    return Number(result.toFixed(1));
-  };
-
-  // Helper to compute harvest date for a crop row
-  const getExpectedHarvestDate = (sowingDate, cropName) => {
-    if (!sowingDate) return "";
-    const days =
-      CROP_DURATION_DAYS[cropName] ?? CROP_DURATION_DAYS["Vegetables Mix"];
-    return addDays(sowingDate, days);
-  };
-
-  // Fetch farmer lands on mount
-  useEffect(() => {
-    const fetchLands = async () => {
-      try {
-        setLandsLoading(true);
-        const res = await api.get("/farmer/land/");
-        const data = Array.isArray(res.data)
-          ? res.data
-          : res.data?.results || [];
-        setLands(data);
-      } catch (err) {
-        console.error("Error fetching lands:", err);
-        setLands([]);
-      } finally {
-        setLandsLoading(false);
-      }
-    };
-
-    fetchLands();
-  }, []);
-
-  const handleRowChange = (index, field, value) => {
-    setRows((prev) => {
-      const clone = [...prev];
-      clone[index] = { ...clone[index], [field]: value };
-      return clone;
-    });
-  };
-
-  const handleAddRow = () => {
-    setRows((prev) => [...prev, EMPTY_ROW]);
-  };
-
-  const handleRemoveRow = (index) => {
-    setRows((prev) => prev.filter((_, i) => i !== index));
-  };
+  // only block form when no land or over-allocated
+  const isDisabledForm = !selectedLandId || isOverAllocated;
 
   const validateForm = () => {
     const newErrors = {};
+    if (!selectedLandId) newErrors.land = "Select land";
 
-    if (!selectedLandId) newErrors.land = "Select a land";
-    if (!soilType) newErrors.soilType = "Select soil type";
-    if (!season) newErrors.season = "Select season";
-    if (!irrigationType) newErrors.irrigationType = "Select irrigation type";
+    if (!soilType) newErrors.soil = "Required";
+    if (!season) newErrors.season = "Required";
+    if (!irrigationType) newErrors.irrigation = "Required";
 
-    rows.forEach((row, idx) => {
-      if (!row.crop) newErrors[`row-${idx}-crop`] = "Select crop";
-      if (!row.acres || Number(row.acres) <= 0) {
-        newErrors[`row-${idx}-acres`] = "Select valid acres";
-      }
-      if (!row.sowingDate) {
-        newErrors[`row-${idx}-sowingDate`] = "Select sowing date";
-      }
+    rows.forEach((r, i) => {
+      if (!r.crop) newErrors[`row-${i}-crop`] = "Required";
+      if (!r.acres || Number(r.acres) <= 0)
+        newErrors[`row-${i}-acres`] = "Invalid";
+      if (!r.sowingDate) newErrors[`row-${i}-sowing`] = "Required";
+      // expected_* are auto, so no validation errors here
     });
 
-    // ✅ Main rule: allocated acres cannot exceed land area
-    if (
-      landAreaAcres != null &&
-      landAreaAcres > 0 &&
-      totalAllocatedAcres > landAreaAcres
-    ) {
-      newErrors.totalAcres = `Allocated acres (${totalAllocatedAcres}) exceed land area (${landAreaAcres})`;
+    if (isOverAllocated) {
+      newErrors.total = "Exceeds available acres!";
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  /**
+   * 🔁 Safely recalc a single row:
+   *  - merge partialRow into that row
+   *  - recompute harvest date
+   *  - call backend to get expectedYield
+   *
+   * opts can override soilType/season/irrigationType
+   */
+  const recalcRow = async (index, partialRow = {}, opts = {}) => {
+    const currentSoil = opts.soilType ?? soilType;
+    const currentSeason = opts.season ?? season;
+    const currentIrrigation = opts.irrigationType ?? irrigationType;
+
+    let mergedRow;
+
+    // 1) Safely update state and compute harvest date
+    setRows((prev) => {
+      if (!prev[index]) {
+        // index might be stale (row removed) – keep prev as is
+        return prev;
+      }
+      const updated = [...prev];
+      mergedRow = { ...updated[index], ...partialRow };
+      mergedRow.expectedHarvestDate = computeHarvestDate(mergedRow);
+      updated[index] = mergedRow;
+      return updated;
+    });
+
+    // If row didn't exist, bail out
+    if (!mergedRow) return;
+
+    const { crop, acres, sowingDate } = mergedRow;
+    const acresNum = Number(acres) || 0;
+
+    // Not enough info yet to ask backend
+    if (
+      !crop ||
+      !acresNum ||
+      !currentSoil ||
+      !currentSeason ||
+      !currentIrrigation ||
+      !sowingDate
+    ) {
+      return;
+    }
+
+    try {
+      const res = await api.get("/farmer/yield-estimate/", {
+        params: {
+          crop,
+          acres: acresNum,
+          soil_type: currentSoil,
+          season: currentSeason,
+          irrigation_type: currentIrrigation,
+          district: "Kolar",
+          state: "Karnataka",
+        },
+      });
+
+      const expectedYield = res.data?.expected_yield;
+
+      if (expectedYield != null) {
+        setRows((prev) => {
+          if (!prev[index]) return prev; // row might be removed
+          const updated = [...prev];
+          updated[index] = {
+            ...updated[index],
+            expectedYield: String(expectedYield),
+          };
+          return updated;
+        });
+      }
+    } catch (err) {
+      console.error("Failed to fetch yield estimate", err);
+      // keep UI usable even if yield API fails
+    }
   };
 
   const handleSubmit = async (e) => {
@@ -292,136 +299,126 @@ export default function CropPlanPage() {
       soil_type: soilType,
       season,
       irrigation_type: irrigationType,
-      notes: notes || "",
+      notes,
       total_acres_allocated: totalAllocatedAcres,
-      crops: rows.map((row) => {
-        const expectedYield = getExpectedYieldPerAcre(row.crop);
-        const harvestDate = getExpectedHarvestDate(row.sowingDate, row.crop);
-        return {
-          crop_name: row.crop,
-          acres: Number(row.acres),
-          seed_variety: row.seedVariety || null,
-          sowing_date: row.sowingDate || null,
-          expected_harvest_date: harvestDate || null,
-          expected_yield_per_acre: expectedYield || null,
-        };
-      }),
+      crops: rows.map((r) => ({
+        crop_name: r.crop,
+        acres: Number(r.acres),
+        seed_variety: r.seedVariety,
+        sowing_date: r.sowingDate,
+        expected_harvest_date: r.expectedHarvestDate,
+        expected_yield: Number(r.expectedYield || 0), // total quintals
+      })),
     };
 
     try {
       setSaving(true);
       await api.post("/farmer/crop-plan/", payload);
-      alert("✅ Crop plan saved successfully");
-      navigate(-1);
-    } catch (error) {
-      console.error("Error saving crop plan:", error);
-      console.log("Server said:", error.response?.data);
 
-      const serverMsg =
-        error.response?.data?.detail ||
-        (error.response?.data
-          ? JSON.stringify(error.response.data, null, 2)
-          : "Unknown error");
+      // ✅ Reset all form state after successful submit
+      setRows([EMPTY_ROW]);
+      setSelectedLandId("");
+      setSoilType("");
+      setSeason("");
+      setIrrigationType("");
+      setNotes("");
+      setErrors({});
 
-      alert(`❌ Failed to save crop plan.\n\n${serverMsg}`);
+      alert("🌱 Crop plan saved successfully");
+
+      // navigate to land page; since we don't persist anything locally,
+      // coming back to this page will show a clean form
+      navigate("/farmer/land");
+    } catch (e) {
+      alert("❌ Failed to save crop plan");
     } finally {
       setSaving(false);
     }
   };
 
-  // Generate dropdown options for acres: 0.5, 1.0, 1.5, ...
-  const getAcreOptions = () => {
-    const max = landAreaAcres && landAreaAcres > 0 ? landAreaAcres : 10;
-    const steps = Math.floor(max * 2); // 0.5 steps
-    return Array.from({ length: steps }, (_, i) => (i + 1) * 0.5);
-  };
-
   return (
-    <Box
-      sx={{
-        p: { xs: 2, md: 4 },
-        maxWidth: 1100,
-        mx: "auto",
-      }}
-    >
-      <Typography variant="h6" fontWeight={600} mb={1}>
+    <Box sx={{ p: 3, maxWidth: 1100, mx: "auto" }}>
+      <Typography variant="h6" fontWeight={600} mb={2}>
         Create Crop Plan
       </Typography>
-      <Typography variant="body2" color="text.secondary" mb={2}>
-        Select a land and plan crops for that land.
-      </Typography>
 
-      <form onSubmit={handleSubmit} noValidate>
-        <Grid container spacing={2}>
-          {/* Plan level card */}
+      <form onSubmit={handleSubmit}>
+        <Grid container spacing={3}>
+          {/* FIELD DETAILS */}
           <Grid item xs={12}>
-            <Card sx={{ borderRadius: 2, boxShadow: { xs: 1, md: 2 } }}>
-              <CardHeader
-                titleTypographyProps={{ variant: "subtitle1", fontWeight: 600 }}
-                title="Field & Season Details"
-                subheader="Land, soil, season and irrigation details."
-              />
-              <CardContent sx={{ pt: 1 }}>
-                <Stack spacing={1.5}>
-                  {/* Land selection */}
+            <Card>
+              <CardHeader title="Field & Season Details" />
+              <CardContent>
+                <Stack spacing={2}>
                   <TextField
                     select
-                    label={
-                      landsLoading
-                        ? "Loading lands..."
-                        : lands.length === 0
-                        ? "No lands found – add land first"
-                        : "Select Land"
-                    }
                     fullWidth
-                    size="small"
+                    label="Select Land"
                     value={selectedLandId}
                     onChange={(e) => setSelectedLandId(e.target.value)}
-                    disabled={landsLoading || lands.length === 0}
-                    error={Boolean(errors.land)}
-                    helperText={
-                      errors.land ||
-                      (landAreaAcres != null && landAreaAcres > 0
-                        ? `Available: ${landAreaAcres} acres`
-                        : "")
-                    }
+                    error={!!errors.land}
+                    helperText={errors.land}
                   >
-                    {lands.map((land) => (
-                      <MenuItem key={land.id} value={land.id}>
-                        {(land.name || land.nick_name || `Land #${land.id}`) +
-                          (land.village ? ` - ${land.village}` : "")}
-                        {land.land_area || land.area_acres || land.total_area
-                          ? ` (${land.land_area || land.area_acres || land.total_area} acres)`
-                          : ""}
+                    {lands.map((l) => (
+                      <MenuItem key={l.id} value={l.id}>
+                        Land #{l.id} — {l.land_area} acres
                       </MenuItem>
                     ))}
                   </TextField>
 
+                  {selectedLand && (
+                    <Typography>
+                      Used: {usedForThisLand} / {landAreaAcres} acres — Remaining:{" "}
+                      {remainingForLand} acres
+                    </Typography>
+                  )}
+
+                  {isOverAllocated && (
+                    <Typography color="error" fontWeight={600}>
+                      🚫 You allocated more acres than available!
+                    </Typography>
+                  )}
+
+                  <Divider />
+
                   <TextField
                     select
+                    fullWidth
                     label="Soil Type"
-                    fullWidth
-                    size="small"
                     value={soilType}
-                    onChange={(e) => setSoilType(e.target.value)}
-                    error={Boolean(errors.soilType)}
-                    helperText={errors.soilType}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSoilType(value);
+                      // recalc yield for all rows with new soil
+                      rows.forEach((_, idx) => {
+                        recalcRow(idx, {}, { soilType: value });
+                      });
+                    }}
+                    disabled={isDisabledForm}
+                    error={!!errors.soil}
+                    helperText={errors.soil}
                   >
-                    {SOIL_TYPES.map((soil) => (
-                      <MenuItem key={soil} value={soil}>
-                        {soil}
+                    {SOIL_TYPES.map((s) => (
+                      <MenuItem key={s} value={s}>
+                        {s}
                       </MenuItem>
                     ))}
                   </TextField>
 
                   <TextField
                     select
-                    label="Season"
                     fullWidth
-                    size="small"
+                    label="Season"
                     value={season}
-                    onChange={(e) => setSeason(e.target.value)}
-                    error={Boolean(errors.season)}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSeason(value);
+                      rows.forEach((_, idx) => {
+                        recalcRow(idx, {}, { season: value });
+                      });
+                    }}
+                    disabled={isDisabledForm}
+                    error={!!errors.season}
                     helperText={errors.season}
                   >
                     {SEASONS.map((s) => (
@@ -433,13 +430,19 @@ export default function CropPlanPage() {
 
                   <TextField
                     select
-                    label="Irrigation Type"
                     fullWidth
-                    size="small"
+                    label="Irrigation Type"
                     value={irrigationType}
-                    onChange={(e) => setIrrigationType(e.target.value)}
-                    error={Boolean(errors.irrigationType)}
-                    helperText={errors.irrigationType}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setIrrigationType(value);
+                      rows.forEach((_, idx) => {
+                        recalcRow(idx, {}, { irrigationType: value });
+                      });
+                    }}
+                    disabled={isDisabledForm}
+                    error={!!errors.irrigation}
+                    helperText={errors.irrigation}
                   >
                     {IRRIGATION_TYPES.map((i) => (
                       <MenuItem key={i} value={i}>
@@ -449,219 +452,152 @@ export default function CropPlanPage() {
                   </TextField>
 
                   <TextField
-                    label="Notes / Special Instructions"
                     fullWidth
-                    size="small"
                     multiline
-                    minRows={3}
+                    label="Notes"
+                    minRows={2}
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
+                    disabled={isDisabledForm}
                   />
                 </Stack>
               </CardContent>
             </Card>
           </Grid>
 
-          {/* Crop allocation card */}
+          {/* CROP ALLOCATION */}
           <Grid item xs={12}>
-            <Card sx={{ borderRadius: 2, boxShadow: { xs: 1, md: 2 } }}>
+            <Card>
               <CardHeader
-                titleTypographyProps={{ variant: "subtitle1", fontWeight: 600 }}
-                title="Crop Allocation"
-                subheader="Add one or more crops and allocate acres for each."
-                action={
-                  <Stack direction="column" alignItems="flex-end" spacing={0.5}>
-                    <Chip
-                      size="small"
-                      label={`Allocated: ${totalAllocatedAcres || 0} acres`}
-                      variant="outlined"
-                    />
-                    {landAreaAcres != null && landAreaAcres > 0 && (
-                      <Typography
-                        variant="caption"
-                        color={
-                          errors.totalAcres ||
-                          (remainingAcres != null && remainingAcres < 0)
-                            ? "error.main"
-                            : "text.secondary"
-                        }
-                      >
-                        Land area: {landAreaAcres} acres{" "}
-                        {remainingAcres != null &&
-                          ` • Remaining: ${Math.max(remainingAcres, 0)} acres`}
-                      </Typography>
-                    )}
-                    {errors.totalAcres && (
-                      <Typography variant="caption" color="error.main">
-                        {errors.totalAcres}
-                      </Typography>
-                    )}
-                  </Stack>
-                }
+                title={`Crop Allocation — Remaining: ${remainingForLand} acres`}
               />
-              <CardContent sx={{ pt: 1 }}>
+              <CardContent>
                 <Stack spacing={2}>
-                  {rows.map((row, index) => {
-                    const rowYield = getExpectedYieldPerAcre(row.crop);
-                    const rowHarvestDate = getExpectedHarvestDate(
-                      row.sowingDate,
-                      row.crop
-                    );
-                    const acreOptions = getAcreOptions();
+                  {rows.map((r, i) => (
+                    <Box
+                      key={i}
+                      sx={{
+                        p: 2,
+                        border: "1px solid #ddd",
+                        borderRadius: 2,
+                      }}
+                    >
+                      <Stack spacing={1}>
+                        <TextField
+                          select
+                          fullWidth
+                          label="Crop"
+                          value={r.crop}
+                          onChange={(e) =>
+                            recalcRow(i, { crop: e.target.value })
+                          }
+                          disabled={isDisabledForm}
+                          error={!!errors[`row-${i}-crop`]}
+                          helperText={errors[`row-${i}-crop`] || ""}
+                        >
+                          {CROP_OPTIONS.map((c) => (
+                            <MenuItem key={c} value={c}>
+                              {c}
+                            </MenuItem>
+                          ))}
+                        </TextField>
 
-                    return (
-                      <Box
-                        key={index}
-                        sx={{
-                          p: 1.5,
-                          borderRadius: 2,
-                          border: "1px solid",
-                          borderColor: "divider",
-                          bgcolor: "background.default",
-                        }}
-                      >
-                        <Stack spacing={1.2}>
-                          <TextField
-                            select
-                            label="Crop / Plant"
-                            size="small"
-                            fullWidth
-                            value={row.crop}
-                            onChange={(e) =>
-                              handleRowChange(index, "crop", e.target.value)
-                            }
-                            error={Boolean(errors[`row-${index}-crop`])}
-                            helperText={errors[`row-${index}-crop`] || ""}
-                          >
-                            {CROP_OPTIONS.map((crop) => (
-                              <MenuItem key={crop} value={crop}>
-                                {crop}
-                              </MenuItem>
-                            ))}
-                          </TextField>
+                        {/* Acres dropdown with smart disabling */}
+                        <TextField
+                          select
+                          fullWidth
+                          label="Acres"
+                          value={r.acres}
+                          onChange={(e) =>
+                            recalcRow(i, { acres: e.target.value })
+                          }
+                          disabled={isDisabledForm}
+                          error={!!errors[`row-${i}-acres`]}
+                          helperText={errors[`row-${i}-acres`] || ""}
+                        >
+                          {(() => {
+                            const maxPossible = landAreaAcres || 0;
+                            const count = Math.floor(maxPossible * 2); // 0.5 steps
+                            const allowedForNewPlan =
+                              landAreaAcres - usedForThisLand;
 
-                          {/* Acres dropdown in 0.5 steps */}
-                          <TextField
-                            select
-                            label="Acres Allocated"
-                            size="small"
-                            fullWidth
-                            value={row.acres}
-                            onChange={(e) =>
-                              handleRowChange(index, "acres", e.target.value)
-                            }
-                            error={Boolean(errors[`row-${index}-acres`])}
-                            helperText={errors[`row-${index}-acres`] || ""}
-                          >
-                            {acreOptions.map((val) => {
-                              // Prevent over allocation: (total - old + new) <= landArea
+                            const currentRowAcres = Number(r.acres) || 0;
+
+                            const options = Array.from(
+                              { length: count },
+                              (_, idx) => (idx + 1) * 0.5
+                            );
+
+                            return options.map((v) => {
                               const newTotal =
-                                totalAllocatedAcres -
-                                (Number(row.acres) || 0) +
-                                val;
-                              const disabled =
-                                landAreaAcres &&
-                                newTotal > landAreaAcres;
+                                totalAllocatedAcres - currentRowAcres + v;
+                              const exceeds = newTotal > allowedForNewPlan;
 
                               return (
-                                <MenuItem
-                                  key={val}
-                                  value={val}
-                                  disabled={!!disabled}
-                                >
-                                  {val} acres
-                                  {disabled ? " (exceeds land)" : ""}
+                                <MenuItem key={v} value={v} disabled={exceeds}>
+                                  {v}
                                 </MenuItem>
                               );
-                            })}
-                          </TextField>
+                            });
+                          })()}
+                        </TextField>
 
-                          <TextField
-                            label="Seed Variety (optional)"
-                            size="small"
-                            fullWidth
-                            value={row.seedVariety}
-                            onChange={(e) =>
-                              handleRowChange(
-                                index,
-                                "seedVariety",
-                                e.target.value
-                              )
-                            }
-                          />
+                        <TextField
+                          type="date"
+                          fullWidth
+                          label="Sowing Date"
+                          InputLabelProps={{ shrink: true }}
+                          value={r.sowingDate}
+                          onChange={(e) =>
+                            recalcRow(i, { sowingDate: e.target.value })
+                          }
+                          disabled={isDisabledForm}
+                          error={!!errors[`row-${i}-sowing`]}
+                          helperText={errors[`row-${i}-sowing`] || ""}
+                        />
 
-                          {/* Sowing Date per crop */}
-                          <TextField
-                            label="Sowing Date"
-                            fullWidth
-                            size="small"
-                            type="date"
-                            InputLabelProps={{ shrink: true }}
-                            value={row.sowingDate}
-                            onChange={(e) =>
-                              handleRowChange(
-                                index,
-                                "sowingDate",
-                                e.target.value
-                              )
-                            }
-                            error={Boolean(errors[`row-${index}-sowingDate`])}
-                            helperText={errors[`row-${index}-sowingDate`] || ""}
-                          />
+                        {/* AUTO Expected Harvest Date (read-only) */}
+                        <TextField
+                          type="date"
+                          fullWidth
+                          label="Expected Harvest Date (auto)"
+                          InputLabelProps={{ shrink: true }}
+                          value={r.expectedHarvestDate}
+                          disabled
+                        />
 
-                          {/* Auto Expected Harvest Date */}
-                          <TextField
-                            label="Expected Harvest Date (auto)"
-                            fullWidth
-                            size="small"
-                            type="date"
-                            InputLabelProps={{ shrink: true }}
-                            value={rowHarvestDate}
-                            InputProps={{ readOnly: true }}
-                            helperText={
-                              row.sowingDate && rowHarvestDate
-                                ? "Auto based on crop duration."
-                                : "Select sowing date to see expected harvest date."
-                            }
-                          />
+                        {/* AUTO Expected Yield (read-only, quintals) */}
+                        <TextField
+                          fullWidth
+                          label="Expected Yield (approx, quintals)"
+                          value={r.expectedYield}
+                          disabled
+                        />
 
-                          {/* Auto Expected Yield per Acre per crop */}
-                          <TextField
-                            label="Expected Yield / Acre (auto)"
-                            fullWidth
-                            size="small"
-                            value={rowYield !== "" ? rowYield : ""}
-                            InputProps={{ readOnly: true }}
-                            helperText={
-                              rowYield
-                                ? "Auto from crop + soil + season + irrigation."
-                                : "Select crop, soil, season & irrigation to see yield."
-                            }
-                          />
-
-                          <Stack direction="row" justifyContent="flex-end">
-                            <Button
-                              size="small"
-                              variant="text"
-                              color="error"
-                              startIcon={<DeleteIcon fontSize="small" />}
-                              onClick={() => handleRemoveRow(index)}
-                              disabled={rows.length === 1}
-                            >
-                              Remove
-                            </Button>
-                          </Stack>
-                        </Stack>
-                      </Box>
-                    );
-                  })}
+                        <Button
+                          color="error"
+                          size="small"
+                          variant="text"
+                          startIcon={<DeleteIcon />}
+                          onClick={() =>
+                            setRows((prev) =>
+                              prev.filter((_, idx) => idx !== i)
+                            )
+                          }
+                          disabled={rows.length === 1 || isDisabledForm}
+                        >
+                          Remove
+                        </Button>
+                      </Stack>
+                    </Box>
+                  ))}
 
                   <Button
                     startIcon={<AddCircleOutlineIcon />}
-                    onClick={handleAddRow}
                     variant="outlined"
                     fullWidth
-                    size="medium"
+                    onClick={() => setRows((prev) => [...prev, EMPTY_ROW])}
+                    disabled={remainingForLand <= 0 || isDisabledForm}
                   >
                     Add another crop
                   </Button>
@@ -670,18 +606,18 @@ export default function CropPlanPage() {
             </Card>
           </Grid>
 
-          {/* Actions */}
+          {/* ACTION BUTTONS */}
           <Grid item xs={12}>
-            <Divider sx={{ mb: 1 }} />
-            <Stack direction="row" spacing={1.5} justifyContent="flex-end">
-              <Button
-                variant="outlined"
-                onClick={() => navigate(-1)}
-                disabled={saving}
-              >
+            <Divider />
+            <Stack direction="row" justifyContent="flex-end" spacing={2} mt={2}>
+              <Button variant="outlined" onClick={() => navigate("/farmer/land")}>
                 Cancel
               </Button>
-              <Button type="submit" variant="contained" disabled={saving}>
+              <Button
+                variant="contained"
+                type="submit"
+                disabled={saving || isOverAllocated}
+              >
                 {saving ? "Saving..." : "Save Crop Plan"}
               </Button>
             </Stack>
