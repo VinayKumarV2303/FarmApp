@@ -1,3 +1,4 @@
+// src/pages/farmer/LandDetails.js
 import React, { useEffect, useState } from "react";
 import {
   Card,
@@ -16,7 +17,8 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import api from "../../api/axios";
 
-const getStatusColor = (status) => {
+const getStatusColor = (rawStatus) => {
+  const status = (rawStatus || "").toLowerCase();
   switch (status) {
     case "approved":
       return "success";
@@ -28,7 +30,8 @@ const getStatusColor = (status) => {
   }
 };
 
-const getStatusLabel = (status) => {
+const getStatusLabel = (rawStatus) => {
+  const status = (rawStatus || "").toLowerCase();
   switch (status) {
     case "approved":
       return "Approved";
@@ -76,13 +79,16 @@ const LandDetails = () => {
 
   if (authLoading || !user) return null;
 
+  // Total area of approved lands
   const totalArea = lands
-  .filter((land) => land.approval_status === "approved")
-  .reduce((sum, land) => sum + (Number(land.land_area) || 0), 0);
+    .filter(
+      (land) => (land.approval_status || "").toLowerCase() === "approved"
+    )
+    .reduce((sum, land) => sum + (Number(land.land_area) || 0), 0);
 
-
-  const handleEdit = (id) => navigate(`/farmer/land/edit/${id}`);
-  const handleAdd = () => navigate(`/farmer/land/add/`);
+  // ✅ updated paths to match App.js
+  const handleEdit = (id) => navigate(`/farmer/lands/${id}/edit`);
+  const handleAdd = () => navigate(`/farmer/lands/add`);
 
   const renderLoadingState = () => (
     <Grid container spacing={2}>
@@ -119,6 +125,18 @@ const LandDetails = () => {
     </Box>
   );
 
+  // Stable ordering for display (oldest first, fallback to id)
+  const sortedLands = lands
+    .slice()
+    .sort((a, b) => {
+      const ta = new Date(a.created_at || 0).getTime();
+      const tb = new Date(b.created_at || 0).getTime();
+      if (!Number.isNaN(ta) && !Number.isNaN(tb) && ta !== tb) {
+        return ta - tb;
+      }
+      return (a.id || 0) - (b.id || 0);
+    });
+
   return (
     <Card elevation={4} sx={{ borderRadius: 3 }}>
       <CardContent>
@@ -143,7 +161,7 @@ const LandDetails = () => {
                 color="text.secondary"
                 sx={{ mt: 0.5, display: "block" }}
               >
-                Total area: <strong>{totalArea}</strong> acres
+                Total approved area: <strong>{totalArea}</strong> acres
               </Typography>
             )}
           </Box>
@@ -169,7 +187,7 @@ const LandDetails = () => {
 
         {!loading && lands.length > 0 && (
           <Grid container spacing={2}>
-            {lands.map((land) => (
+            {sortedLands.map((land, index) => (
               <Grid item xs={12} key={land.id}>
                 <Card variant="outlined" sx={{ borderRadius: 2 }}>
                   <CardContent>
@@ -179,8 +197,9 @@ const LandDetails = () => {
                       alignItems="center"
                     >
                       <Box>
+                        {/* UI label: Land #1, Land #2, ... (not DB id) */}
                         <Typography variant="subtitle1" fontWeight={600}>
-                          Land #{land.id}
+                          Land #{index + 1}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
                           {(land.village || "-") +
@@ -205,7 +224,8 @@ const LandDetails = () => {
 
                     {/* Admin remark (for rejected) */}
                     {land.admin_remark &&
-                      land.approval_status === "rejected" && (
+                      (land.approval_status || "").toLowerCase() ===
+                        "rejected" && (
                         <Typography
                           color="error"
                           variant="body2"

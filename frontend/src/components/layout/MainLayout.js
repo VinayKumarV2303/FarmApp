@@ -25,7 +25,7 @@ const MainLayout = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
 
   const sidebarWidth = sidebarOpen ? "4.0cm" : "56px";
 
@@ -33,36 +33,29 @@ const MainLayout = () => {
     {
       label: "Dashboard",
       icon: <DashboardIcon fontSize="small" />,
-      segment: "dashboard",
       to: "/farmer/dashboard",
     },
     {
       label: "Profile",
       icon: <PersonIcon fontSize="small" />,
-      segment: "profile",
       to: "/farmer/profile",
     },
     {
-      label: "Land",
+      label: "Lands",
       icon: <AgricultureIcon fontSize="small" />,
-      segment: "land",
-      to: "/farmer/land",
+      to: "/farmer/lands",
     },
     {
-      label: "Crop",
+      label: "Crop Details",
       icon: <GrainIcon fontSize="small" />,
-      segment: "crop-plan", // for future, if you add /farmer/crop-plan list etc.
-      to: "/farmer/crop-plan/create", // ✅ goes to your Create Crop Plan page
+      // 👉 now goes to CropDetails.js
+      to: "/farmer/cropdetails",
+
     },
+    
   ];
 
-  // Use item.to when available, otherwise fallback to /farmer/<segment>
-  const isActive = (item) => {
-    if (item.to) {
-      return location.pathname.startsWith(item.to);
-    }
-    return location.pathname.startsWith(`/farmer/${item.segment}`);
-  };
+  const isActive = (item) => location.pathname.startsWith(item.to);
 
   const handleLogout = () => {
     logout();
@@ -78,7 +71,7 @@ const MainLayout = () => {
         overflow: "hidden",
       }}
     >
-      {/* FIXED SIDEBAR */}
+      {/* SIDEBAR */}
       <Box
         sx={{
           width: sidebarWidth,
@@ -96,6 +89,7 @@ const MainLayout = () => {
           zIndex: 1200,
         }}
       >
+        {/* Logo + toggle */}
         <Stack
           direction="row"
           alignItems="center"
@@ -108,9 +102,9 @@ const MainLayout = () => {
               sx={{ fontWeight: 700, lineHeight: 1.1, cursor: "pointer" }}
               onClick={() => navigate("/farmer/dashboard")}
             >
-              Alpha
+              Farm
               <br />
-              Farmer
+              App
             </Typography>
           )}
 
@@ -134,18 +128,12 @@ const MainLayout = () => {
           </IconButton>
         </Stack>
 
-        {/* Navigation */}
+        {/* Navigation items */}
         <Stack spacing={1}>
           {navItems.map((item) => {
             const active = isActive(item);
 
-            const handleClick = () => {
-              if (item.to) {
-                navigate(item.to);
-              } else {
-                navigate(`/farmer/${item.segment}`);
-              }
-            };
+            const handleClick = () => navigate(item.to);
 
             const content = (
               <Box
@@ -204,7 +192,7 @@ const MainLayout = () => {
         </Box>
       </Box>
 
-      {/* MAIN CONTENT AREA */}
+      {/* MAIN CONTENT */}
       <Box
         sx={{
           flexGrow: 1,
@@ -214,8 +202,20 @@ const MainLayout = () => {
           transition: "margin-left 0.25s ease",
           height: "100vh",
           overflowY: "auto",
+          bgcolor: "#f3f4f6",
         }}
       >
+        {/* Welcome header */}
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="h5" sx={{ fontWeight: 600 }}>
+          </Typography>
+          {user && (
+            <Typography variant="body2" color="text.secondary">
+            </Typography>
+          )}
+        </Box>
+
+        {/* Nested page content */}
         <Outlet />
       </Box>
     </Box>

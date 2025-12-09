@@ -28,8 +28,6 @@ class LandSerializer(serializers.ModelSerializer):
 
 
 class NewsSerializer(serializers.ModelSerializer):
-    author_name = serializers.ReadOnlyField()
-
     class Meta:
         model = News
         fields = [
@@ -37,12 +35,16 @@ class NewsSerializer(serializers.ModelSerializer):
             "title",
             "summary",
             "content",
+            "image_url",
+            "url",
             "tags",
             "is_important",
-            "author_name",
-            "created_at",
             "is_active",
+            "status",
+            "created_at",
+            "updated_at",
         ]
+
 
 
 class CropAllocationSerializer(serializers.ModelSerializer):

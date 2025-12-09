@@ -1,394 +1,348 @@
 // src/pages/admin/AdminDashboard.js
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Box,
-  Grid,
   Card,
   CardContent,
   Typography,
-  Stack,
-  LinearProgress,
-  Chip,
+  Grid,
+  Alert,
+  CircularProgress,
   Table,
+  TableBody,
+  TableCell,
   TableHead,
   TableRow,
-  TableCell,
-  TableBody,
-  Paper,
-  Button,
+  Chip,
+  Stack,
+  Divider,
 } from "@mui/material";
-
-import PeopleAltIcon from "@mui/icons-material/PeopleAlt";
-import ChecklistIcon from "@mui/icons-material/Checklist";
-import MapIcon from "@mui/icons-material/Map";
-import AssignmentTurnedInIcon from "@mui/icons-material/AssignmentTurnedIn";
-import PendingActionsIcon from "@mui/icons-material/PendingActions";
+import api from "../../api/axios";
+import AdminLayout from "../../components/layout/AdminLayout";
 
 import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  ArcElement,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
   Tooltip,
   Legend,
-} from "chart.js";
-import { Bar, Pie } from "react-chartjs-2";
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+} from "recharts";
 
-import { useNavigate } from "react-router-dom";
-import api from "../../api/axios";
+// ---------- HELPERS ----------
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend);
+const getAdminHeaders = () => {
+  const token = localStorage.getItem("adminToken");
+  if (!token) return {};
+  return {
+    Authorization: `Bearer ${token}`,
+  };
+};
+
+const APPROVAL_COLORS = {
+  Pending: "#FFA726",
+  Approved: "#66BB6A",
+  Rejected: "#EF5350",
+};
 
 export default function AdminDashboard() {
-  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const navigate = useNavigate();
-
-  const fetchDashboard = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError("");
-      const res = await api.get("/adminpanel/api/dashboard/");
-      setStats(res.data);
-    } catch (err) {
-      console.error(err);
-      setError("Failed to load admin analytics. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [stats, setStats] = useState(null);
 
   useEffect(() => {
+    const fetchDashboard = async () => {
+      setError("");
+      setLoading(true);
+      try {
+        const res = await api.get("/adminpanel/api/dashboard/", {
+          headers: getAdminHeaders(),
+        });
+        setStats(res.data);
+      } catch (err) {
+        console.error("Admin dashboard fetch error:", err.response?.data || err);
+        setError(
+          err.response?.data?.detail ||
+            err.response?.data?.message ||
+            "Failed to load dashboard data."
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+
     fetchDashboard();
-  }, [fetchDashboard]);
+  }, []);
 
-  const profileCompletionRate = useMemo(() => {
-    if (!stats || !stats.total_farmers) return 0;
-    return Math.round((stats.profiles_completed / stats.total_farmers) * 100);
-  }, [stats]);
+  const farmersByDistrictData =
+    stats?.farmers_by_district?.map((row) => ({
+      district: row.district || "Unknown",
+      farmers: row.count || 0,
+    })) || [];
 
-  const pendingCount = stats?.farmer_approval_summary?.Pending ?? 0;
-  const approvedCount = stats?.farmer_approval_summary?.Approved ?? 0;
-  const rejectedCount = stats?.farmer_approval_summary?.Rejected ?? 0;
-
-  const chartDataBar = useMemo(() => {
-    if (!stats) return null;
-    return {
-      labels: stats.chart_labels || [],
-      datasets: [
+  const landApprovalSummaryData = stats
+    ? [
         {
-          label: "Farmers",
-          data: stats.chart_values || [],
-          borderWidth: 1,
+          name: "Pending",
+          value: stats.land_approval_summary?.Pending || 0,
         },
-      ],
-    };
-  }, [stats]);
-
-  const chartDataPie = useMemo(() => {
-    if (!stats) return null;
-    const total =
-      (stats.chart_values || []).reduce((acc, v) => acc + (v || 0), 0) || 1;
-    const percentages = (stats.chart_values || []).map((v) =>
-      Math.round((v / total) * 100)
-    );
-    return {
-      labels: stats.chart_labels || [],
-      datasets: [
         {
-          label: "Share (%)",
-          data: percentages,
-          borderWidth: 1,
+          name: "Approved",
+          value: stats.land_approval_summary?.Approved || 0,
         },
-      ],
-    };
-  }, [stats]);
-
-  const chartOptionsBar = {
-    responsive: true,
-    maintainAspectRatio: false,
-    scales: {
-      x: {
-        ticks: {
-          maxRotation: 60,
-          minRotation: 0,
+        {
+          name: "Rejected",
+          value: stats.land_approval_summary?.Rejected || 0,
         },
-      },
-      y: {
-        beginAtZero: true,
-        ticks: {
-          precision: 0,
-        },
-      },
-    },
-    plugins: {
-      legend: { display: false },
-    },
-  };
-
-  const chartOptionsPie = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: { position: "bottom" },
-    },
-  };
+      ]
+    : [];
 
   const pendingFarmers = stats?.pending_farmers || [];
 
-  return (
-    <Box sx={{ minHeight: "100vh", bgcolor: "#f5f7fb", p: { xs: 2, md: 3 } }}>
-      <Box
-        sx={{
-          mb: 3,
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: { xs: "flex-start", md: "center" },
-          gap: 1,
-        }}
-      >
-        <Box>
-          <Typography variant="h5" fontWeight={700}>
-            Admin Dashboard
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Overview of users, farmers, approvals and region-wise distribution.
-          </Typography>
-        </Box>
+  const totalUsers = stats?.total_users ?? 0;
+  const totalFarmers = stats?.total_farmers ?? 0;
+  const profilesCompleted = stats?.profiles_completed ?? 0;
+  const profileCompletionRate =
+    totalFarmers > 0 ? Math.round((profilesCompleted / totalFarmers) * 100) : 0;
 
-        {stats && (
-          <Stack direction="row" spacing={1}>
-            <Chip
-              label={`Users: ${stats.total_users ?? 0}`}
-              variant="outlined"
-              size="small"
-            />
-            <Chip
-              label={`Farmers: ${stats.total_farmers ?? 0}`}
-              variant="outlined"
-              size="small"
-              color="primary"
-            />
-          </Stack>
+  return (
+    <AdminLayout title="Admin Dashboard">
+      <Box>
+        <Typography variant="h5" sx={{ mb: 1 }}>
+          Overview
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+          User onboarding, land approvals and farmer distribution at a glance.
+        </Typography>
+
+        {loading && (
+          <Box sx={{ display: "flex", justifyContent: "center", mt: 4 }}>
+            <CircularProgress />
+          </Box>
+        )}
+
+        {!loading && error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
+        )}
+
+        {!loading && !error && stats && (
+          <>
+            {/* ---------- TOP STATS ---------- */}
+            <Grid container spacing={2} sx={{ mb: 3 }}>
+              <Grid item xs={12} sm={4}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Total Users
+                    </Typography>
+                    <Typography variant="h4">{totalUsers}</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      All accounts registered
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              <Grid item xs={12} sm={4}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Total Farmers
+                    </Typography>
+                    <Typography variant="h4">{totalFarmers}</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Farmers with at least one land
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              <Grid item xs={12} sm={4}>
+                <Card>
+                  <CardContent>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Profile Completion
+                    </Typography>
+                    <Typography variant="h4">
+                      {profileCompletionRate}%
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {profilesCompleted} of {totalFarmers} farmers have
+                      location details
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+
+            {/* ---------- CHARTS ROW ---------- */}
+            <Grid container spacing={2} sx={{ mb: 3 }}>
+              <Grid item xs={12} md={7}>
+                <Card sx={{ height: 360 }}>
+                  <CardContent sx={{ height: "100%" }}>
+                    <Typography variant="subtitle1" sx={{ mb: 1 }}>
+                      Farmers by District
+                    </Typography>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ mb: 2, display: "block" }}
+                    >
+                      Distribution of farmers across districts
+                    </Typography>
+                    {farmersByDistrictData.length === 0 ? (
+                      <Typography variant="body2" color="text.secondary">
+                        No farmer distribution data available.
+                      </Typography>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart
+                          data={farmersByDistrictData}
+                          margin={{ top: 10, right: 10, left: -10, bottom: 40 }}
+                        >
+                          <XAxis
+                            dataKey="district"
+                            angle={-35}
+                            textAnchor="end"
+                            interval={0}
+                            height={70}
+                          />
+                          <YAxis />
+                          <Tooltip />
+                          <Legend />
+                          <Bar dataKey="farmers" name="Farmers" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    )}
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              <Grid item xs={12} md={5}>
+                <Card sx={{ height: 360 }}>
+                  <CardContent sx={{ height: "100%" }}>
+                    <Typography variant="subtitle1" sx={{ mb: 1 }}>
+                      Land Approval Status
+                    </Typography>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      sx={{ mb: 2, display: "block" }}
+                    >
+                      Pending vs approved vs rejected lands
+                    </Typography>
+                    {landApprovalSummaryData.every((d) => d.value === 0) ? (
+                      <Typography variant="body2" color="text.secondary">
+                        No land approval data available.
+                      </Typography>
+                    ) : (
+                      <ResponsiveContainer width="100%" height="80%">
+                        <PieChart>
+                          <Pie
+                            data={landApprovalSummaryData}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            outerRadius={90}
+                            label
+                          >
+                            {landApprovalSummaryData.map((entry, index) => {
+                              const color =
+                                APPROVAL_COLORS[entry.name] ||
+                                ["#42A5F5", "#66BB6A", "#FFCA28"][
+                                  index % 3
+                                ];
+                              return <Cell key={entry.name} fill={color} />;
+                            })}
+                          </Pie>
+                          <Tooltip />
+                          <Legend />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    )}
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+
+            {/* ---------- PENDING FARMERS TABLE ---------- */}
+            <Card>
+              <CardContent>
+                <Stack
+                  direction="row"
+                  alignItems="center"
+                  justifyContent="space-between"
+                  sx={{ mb: 1 }}
+                >
+                  <Typography variant="subtitle1">
+                    Pending Farmer Approvals
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Showing up to 10 farmers with pending lands
+                  </Typography>
+                </Stack>
+                <Divider sx={{ mb: 2 }} />
+
+                {pendingFarmers.length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">
+                    No pending farmer approvals. 🎉
+                  </Typography>
+                ) : (
+                  <Table size="small">
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Farmer</TableCell>
+                        <TableCell>Phone</TableCell>
+                        <TableCell>Village</TableCell>
+                        <TableCell>District</TableCell>
+                        <TableCell>State</TableCell>
+                        <TableCell align="right">Land Area</TableCell>
+                        <TableCell>Status</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {pendingFarmers.map((f) => (
+                        <TableRow key={f.id}>
+                          <TableCell>{f.name || f.username || "-"}</TableCell>
+                          <TableCell>{f.phone || "-"}</TableCell>
+                          <TableCell>{f.village || "-"}</TableCell>
+                          <TableCell>{f.district || "-"}</TableCell>
+                          <TableCell>{f.state || "-"}</TableCell>
+                          <TableCell align="right">
+                            {f.land_area || "-"}
+                          </TableCell>
+                          <TableCell>
+                            <Chip
+                              label={f.approval_status || "pending"}
+                              size="small"
+                              sx={{
+                                textTransform: "capitalize",
+                                bgcolor:
+                                  f.approval_status === "approved"
+                                    ? "success.light"
+                                    : f.approval_status === "rejected"
+                                    ? "error.light"
+                                    : "warning.light",
+                              }}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </CardContent>
+            </Card>
+          </>
         )}
       </Box>
-
-      {loading && <LinearProgress sx={{ mb: 2 }} />}
-      {error && (
-        <Card sx={{ mb: 3, borderLeft: "4px solid", borderColor: "error.main", bgcolor: "#fff" }}>
-          <CardContent>
-            <Typography color="error.main" fontWeight={600}>
-              {error}
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              Ensure backend is running at <code>localhost:8000</code>.
-            </Typography>
-          </CardContent>
-        </Card>
-      )}
-
-      {!stats || loading ? null : (
-        <>
-          {/* Metric Cards */}
-          <Grid container spacing={2} sx={{ mb: 3 }}>
-            {/* Total Farmers + NEW LINK */}
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ borderRadius: 3, boxShadow: 2, height: "100%" }}>
-                <CardContent>
-                  <Stack direction="row" justifyContent="space-between">
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">
-                        TOTAL FARMERS
-                      </Typography>
-                      <Typography variant="h5" fontWeight={700}>
-                        {stats.total_farmers ?? 0}
-                      </Typography>
-                    </Box>
-                    <Box
-                      sx={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: "50%",
-                        bgcolor: "primary.main",
-                        color: "#fff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <PeopleAltIcon fontSize="small" />
-                    </Box>
-                  </Stack>
-
-                  <Typography variant="body2" sx={{ mt: 1 }} color="text.secondary">
-                    All registered farmer accounts.
-                  </Typography>
-
-                  {/* NEW BUTTON */}
-                  <Button
-                    size="small"
-                    variant="text"
-                    sx={{ mt: 0.5, p: 0, textTransform: "none" }}
-                    onClick={() =>
-                      window.open("http://localhost:8000/admin/farmer/farmer/", "_blank")
-                    }
-                  >
-                    View all details →
-                  </Button>
-                </CardContent>
-              </Card>
-            </Grid>
-
-            {/* Completion */}
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ borderRadius: 3, boxShadow: 2 }}>
-                <CardContent>
-                  <Stack direction="row" justifyContent="space-between">
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">
-                        PROFILES COMPLETED
-                      </Typography>
-                      <Typography variant="h5" fontWeight={700}>
-                        {stats.profiles_completed}
-                      </Typography>
-                    </Box>
-                    <Box
-                      sx={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: "50%",
-                        bgcolor: "success.main",
-                        color: "#fff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <ChecklistIcon fontSize="small" />
-                    </Box>
-                  </Stack>
-                  <Typography variant="body2" sx={{ mt: 1 }} color="text.secondary">
-                    {profileCompletionRate}% have full profiles.
-                  </Typography>
-                </CardContent>
-              </Card>
-            </Grid>
-
-            {/* Approval Summary */}
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ borderRadius: 3, boxShadow: 2 }}>
-                <CardContent>
-                  <Typography variant="caption" color="text.secondary">
-                    APPROVALS
-                  </Typography>
-                  <Stack direction="row" gap={2} sx={{ mt: 1 }}>
-                    <Stack><b>Pending</b> {pendingCount}</Stack>
-                    <Stack><b>Approved</b> {approvedCount}</Stack>
-                    <Stack><b>Rejected</b> {rejectedCount}</Stack>
-                  </Stack>
-                  <Button
-                    size="small"
-                    sx={{ mt: 1, textTransform: "none" }}
-                    variant="outlined"
-                    startIcon={<AssignmentTurnedInIcon />}
-                    onClick={() => navigate("/admin/approvals")}
-                  >
-                    Manage approvals
-                  </Button>
-                </CardContent>
-              </Card>
-            </Grid>
-
-            {/* Districts */}
-            <Grid item xs={12} sm={6} md={3}>
-              <Card sx={{ borderRadius: 3, boxShadow: 2 }}>
-                <CardContent>
-                  <Stack direction="row" justifyContent="space-between">
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">
-                        ACTIVE DISTRICTS
-                      </Typography>
-                      <Typography variant="h5" fontWeight={700}>
-                        {stats.farmers_by_district?.length}
-                      </Typography>
-                    </Box>
-                    <Box
-                      sx={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: "50%",
-                        bgcolor: "secondary.main",
-                        color: "#fff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <MapIcon fontSize="small" />
-                    </Box>
-                  </Stack>
-                </CardContent>
-              </Card>
-            </Grid>
-          </Grid>
-
-          {/* Pending Preview */}
-          <Paper sx={{ borderRadius: 3, boxShadow: 2 }}>
-            <Box sx={{ p: 2, borderBottom: "1px solid #eee" }}>
-              <Typography variant="subtitle1" fontWeight={600}>
-                Pending Farmer Approvals
-              </Typography>
-            </Box>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Farmer</TableCell>
-                  <TableCell>Village</TableCell>
-                  <TableCell>District</TableCell>
-                  <TableCell align="right">Land (acres)</TableCell>
-                  <TableCell align="right">Details</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {pendingFarmers.length ? (
-                  pendingFarmers.map((f) => (
-                    <TableRow key={f.id} hover>
-                      <TableCell>{f.name}</TableCell>
-                      <TableCell>{f.village}</TableCell>
-                      <TableCell>{f.district}</TableCell>
-                      <TableCell align="right">{f.land_area}</TableCell>
-
-                      {/* Already added: Farmer details link */}
-                      <TableCell align="right">
-                        <Button
-                          size="small"
-                          sx={{ textTransform: "none" }}
-                          onClick={() =>
-                            window.open(
-                              `http://localhost:8000/admin/farmer/farmer/${f.id}/change/`,
-                              "_blank"
-                            )
-                          }
-                        >
-                          View details →
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow>
-                    <TableCell colSpan={5} align="center" sx={{ py: 2 }}>
-                      No pending approvals 🎉
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </Paper>
-        </>
-      )}
-    </Box>
+    </AdminLayout>
   );
 }

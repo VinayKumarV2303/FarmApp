@@ -3,76 +3,105 @@ import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 
 import Login from "./pages/auth/Login";
+import Signup from "./pages/auth/Signup";
 
 import FarmerDashboard from "./pages/farmer/Dashboard";
 import LandDetails from "./pages/farmer/LandDetails";
 import LandEdit from "./pages/farmer/LandEdit";
 import AddLand from "./pages/farmer/AddLand";
 import ProfilePage from "./pages/farmer/ProfilePage";
-
-// ✅ NEW: Import CropPlanPage
+import CropDetailsPage from "./pages/farmer/CropDetailsPage";
 import CropPlanPage from "./pages/farmer/CropPlanPage";
 
+import AdminLogin from "./pages/admin/AdminLogin";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import Approvals from "./pages/admin/Approvals";
+import AdminNewsPage from "./pages/admin/News";
 
+import { useAuth } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import MainLayout from "./components/layout/MainLayout";
 
-const App = () => {
+// ---------- ADMIN GUARD ----------
+const AdminRoute = ({ children }) => {
+  const { user } = useAuth();
+  const ctxRole = user?.user?.role || user?.role;
+  const adminRoleLS = localStorage.getItem("adminRole");
+  const adminToken = localStorage.getItem("adminToken");
+
+  if (ctxRole === "admin" || (adminRoleLS === "admin" && adminToken)) {
+    return children;
+  }
+
+  return <Navigate to="/admin/login" replace />;
+};
+
+export default function App() {
   return (
     <Routes>
-      {/* Public */}
-      <Route path="/login" element={<Login />} />
+      {/* ---------- ROOT ---------- */}
+      <Route path="/" element={<Navigate to="/login" replace />} />
 
-      {/* Admin area */}
+      {/* ---------- PUBLIC AUTH ---------- */}
+      <Route path="/login" element={<Login />} />
+      <Route path="/signup" element={<Signup />} />
+
+      {/* ---------- ADMIN ROUTES ---------- */}
+      <Route path="/admin" element={<Navigate to="/admin/login" replace />} />
+      <Route path="/admin/login" element={<AdminLogin />} />
+
       <Route
         path="/admin/dashboard"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <AdminDashboard />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/approvals"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <Approvals />
-          </ProtectedRoute>
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/news"
+        element={
+          <AdminRoute>
+            <AdminNewsPage />
+          </AdminRoute>
         }
       />
 
-      {/* Farmer area with layout */}
+      {/* ---------- FARMER ROUTES (wrapped in MainLayout) ---------- */}
       <Route
         path="/farmer"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute allowedRoles={["farmer"]}>
             <MainLayout />
           </ProtectedRoute>
         }
       >
-        {/* Default redirect to dashboard */}
-        <Route index element={<Navigate to="dashboard" replace />} />
-
-        {/* Farmer main pages */}
         <Route path="dashboard" element={<FarmerDashboard />} />
+
+        <Route path="lands" element={<LandDetails />} />
+        <Route path="lands/add" element={<AddLand />} />
+        <Route path="lands/:id/edit" element={<LandEdit />} />
+
+        {/* 👇 These two are the ones Crop pages use */}
+        <Route path="cropdetails" element={<CropDetailsPage />} />
+        <Route path="crop-plan" element={<CropPlanPage />} />
+
         <Route path="profile" element={<ProfilePage />} />
 
-        {/* Land routes */}
-        <Route path="land" element={<LandDetails />} />
-        <Route path="land/add" element={<AddLand />} />
-        <Route path="land/edit/:id" element={<LandEdit />} />
-
-        {/* ✅ New Crop Plan page (inside farmer layout) */}
-        <Route path="crop-plan/create" element={<CropPlanPage />} />
+        {/* default /farmer → /farmer/dashboard */}
+        <Route index element={<Navigate to="dashboard" replace />} />
       </Route>
 
-      {/* Default */}
-      <Route path="/" element={<Navigate to="/login" replace />} />
+      {/* ---------- FALLBACK ---------- */}
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );
-};
-
-export default App;
+}

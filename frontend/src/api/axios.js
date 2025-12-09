@@ -5,25 +5,25 @@ const API_BASE_URL = "http://localhost:8000";
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  // ❌ remove withCredentials or set it to false
-  // withCredentials: true,
 });
 
-// keep your interceptor as-is:
-api.interceptors.request.use((config) => {
-  const saved = localStorage.getItem("alpha_auth");
-  if (saved) {
+// Attach token from localStorage on every request
+api.interceptors.request.use(
+  (config) => {
     try {
-      const parsed = JSON.parse(saved);
-      const token = parsed.token;
-      if (token) {
-        config.headers.Authorization = `Token ${token}`;
+      const stored = localStorage.getItem("authUser");
+      if (stored) {
+        const authUser = JSON.parse(stored);
+        if (authUser?.token) {
+          config.headers.Authorization = `Token ${authUser.token}`;
+        }
       }
     } catch (err) {
-      console.error("Invalid alpha_auth in localStorage", err);
+      console.error("Failed to read authUser", err);
     }
-  }
-  return config;
-});
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
 export default api;

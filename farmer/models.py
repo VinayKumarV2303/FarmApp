@@ -81,9 +81,15 @@ class Land(models.Model):
             old = Land.objects.filter(pk=self.pk).first()
             if old:
                 editable_fields = [
-                    "country", "village", "district", "state",
-                    "land_area", "latitude", "longitude",
-                    "soil_type", "irrigation_type",
+                    "country",
+                    "village",
+                    "district",
+                    "state",
+                    "land_area",
+                    "latitude",
+                    "longitude",
+                    "soil_type",
+                    "irrigation_type",
                 ]
 
                 changed = any(
@@ -92,42 +98,52 @@ class Land(models.Model):
                 )
 
                 if (
-                    changed and
-                    old.approval_status == "approved" and
-                    self.approval_status == old.approval_status
+                    changed
+                    and old.approval_status == "approved"
+                    and self.approval_status == old.approval_status
                 ):
                     self.approval_status = "pending"
 
         super().save(*args, **kwargs)
 
 
+# 🔹 CLEAN NEWS MODEL (single definition)
 class News(models.Model):
+    STATUS_PENDING = "pending"
+    STATUS_APPROVED = "approved"
+    STATUS_REJECTED = "rejected"
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, "Pending"),
+        (STATUS_APPROVED, "Approved"),
+        (STATUS_REJECTED, "Rejected"),
+    ]
+
     title = models.CharField(max_length=255)
-    summary = models.TextField(blank=True)
+    summary = models.CharField(max_length=500, blank=True)
     content = models.TextField(blank=True)
+
+    # used for photo/image in admin UI
+    image_url = models.URLField(blank=True)
+    # optional external link
+    url = models.URLField(blank=True)
 
     tags = models.CharField(max_length=255, blank=True)
 
     is_important = models.BooleanField(default=False)
-    author = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="farmer_news",
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
-
     is_active = models.BooleanField(default=True)
+
+    status = models.CharField(
+        max_length=10,
+        choices=STATUS_CHOICES,
+        default=STATUS_PENDING,
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.title
-
-    @property
-    def author_name(self):
-        if self.author:
-            return self.author.get_full_name() or self.author.username
-        return ""
 
 
 class CropPlan(models.Model):
@@ -160,7 +176,6 @@ class CropPlan(models.Model):
         default=0,
     )
 
-    # 🌱 APPROVAL FLOW ADDED
     approval_status = models.CharField(
         max_length=10,
         choices=APPROVAL_CHOICES,
@@ -179,8 +194,11 @@ class CropPlan(models.Model):
             old = CropPlan.objects.filter(pk=self.pk).first()
             if old:
                 editable_fields = [
-                    "soil_type", "season", "irrigation_type",
-                    "notes", "total_acres_allocated",
+                    "soil_type",
+                    "season",
+                    "irrigation_type",
+                    "notes",
+                    "total_acres_allocated",
                 ]
 
                 changed = any(
@@ -189,9 +207,9 @@ class CropPlan(models.Model):
                 )
 
                 if (
-                    changed and
-                    old.approval_status == "approved" and
-                    self.approval_status == old.approval_status
+                    changed
+                    and old.approval_status == "approved"
+                    and self.approval_status == old.approval_status
                 ):
                     self.approval_status = "pending"
                     self.admin_remark = ""
@@ -223,3 +241,82 @@ class CropAllocation(models.Model):
 
     def __str__(self):
         return f"{self.crop_name} - {self.acres} acres"
+
+
+# 🔹 Admin-editable yield config per crop + factors
+class CropYieldConfig(models.Model):
+    SOIL_TYPES = [
+        ("Alluvial", "Alluvial"),
+        ("Black", "Black"),
+        ("Red", "Red"),
+        ("Laterite", "Laterite"),
+        ("Desert", "Desert"),
+        ("Mountain", "Mountain"),
+        ("Sandy Loam", "Sandy Loam"),
+        ("Clay Loam", "Clay Loam"),
+    ]
+
+    SEASONS = [
+        ("Kharif (Monsoon)", "Kharif (Monsoon)"),
+        ("Rabi (Winter)", "Rabi (Winter)"),
+        ("Zaid (Summer)", "Zaid (Summer)"),
+        ("Perennial (All Year)", "Perennial (All Year)"),
+    ]
+
+    IRRIGATION_TYPES = [
+        ("Rainfed", "Rainfed"),
+        ("Canal", "Canal"),
+        ("Tube well", "Tube well"),
+        ("Drip", "Drip"),
+        ("Sprinkler", "Sprinkler"),
+    ]
+
+    crop_name = models.CharField(max_length=100)
+
+    soil_type = models.CharField(
+        max_length=50,
+        choices=SOIL_TYPES,
+        blank=True,
+        default="",
+    )
+    season = models.CharField(
+        max_length=50,
+        choices=SEASONS,
+        blank=True,
+        default="",
+    )
+    irrigation_type = models.CharField(
+        max_length=50,
+        choices=IRRIGATION_TYPES,
+        blank=True,
+        default="",
+    )
+
+    # Yield per acre in QUINTALS (admin sets approx value)
+    yield_quintals_per_acre = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+    )
+
+    is_active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Crop Yield Config"
+        verbose_name_plural = "Crop Yield Configs"
+        unique_together = (
+            "crop_name",
+            "soil_type",
+            "season",
+            "irrigation_type",
+        )
+
+    def __str__(self):
+        parts = [self.crop_name]
+        if self.soil_type:
+            parts.append(self.soil_type)
+        if self.season:
+            parts.append(self.season)
+        if self.irrigation_type:
+            parts.append(self.irrigation_type)
+        return " / ".join(parts)

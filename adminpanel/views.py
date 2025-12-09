@@ -1,25 +1,112 @@
 # adminpanel/views.py
+from functools import wraps
+
+from django.conf import settings
+from django.views.decorators.csrf import csrf_exempt
+
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, serializers
 
-from accounts.models import Account
-from farmer.models import Farmer, Land
-from django.db.models import Count
+from accounts.models import Account, AdminAccount
+from farmer.models import Farmer, Land, CropPlan, CropAllocation, News
+from django.db.models import Count, Sum
 
+
+# --------- ADMIN TOKEN GUARD ----------
+
+def require_admin_token(view_func):
+    """
+    Admin auth for dev.
+
+    Accepts ANY of these headers:
+
+      Authorization: Bearer admin-<id>
+      Authorization: Token admin-<id>
+      Authorization: admin-<id>
+      Authorization: Bearer admintoken-<id>-<sig>   (old format)
+
+    And when DEBUG=True and token is missing/invalid, it will
+    fall back to the FIRST AdminAccount so you are not blocked
+    during local development.
+    """
+
+    @wraps(view_func)
+    def wrapped(request, *args, **kwargs):
+        auth_header = (
+            request.headers.get("Authorization")
+            or request.META.get("HTTP_AUTHORIZATION")
+            or ""
+        )
+
+        raw = auth_header.strip()
+        token = raw
+
+        low = raw.lower()
+        if low.startswith("bearer "):
+            token = raw[7:].strip()
+        elif low.startswith("token "):
+            token = raw[6:].strip()
+
+        admin_obj = None
+
+        if token.startswith("admin-"):
+            try:
+                admin_id = int(token.split("-", 1)[1])
+                admin_obj = AdminAccount.objects.filter(id=admin_id).first()
+            except Exception:
+                admin_obj = None
+
+        elif token.startswith("admintoken-"):
+            parts = token.split("-")
+            if len(parts) >= 2:
+                try:
+                    admin_id = int(parts[1])
+                    admin_obj = AdminAccount.objects.filter(id=admin_id).first()
+                except Exception:
+                    admin_obj = None
+
+        if admin_obj is None and settings.DEBUG:
+            admin_obj = AdminAccount.objects.first()
+
+        if admin_obj is None:
+            return Response(
+                {"detail": "Admin token missing or invalid"},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        request.admin_account = admin_obj
+        return view_func(request, *args, **kwargs)
+
+    return wrapped
+
+
+# --------- SERIALIZERS ----------
+
+class NewsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = News
+        fields = [
+            "id",
+            "title",
+            "summary",
+            "content",
+            "image_url",
+            "url",
+            "tags",
+            "is_important",
+            "is_active",
+            "status",
+            "created_at",
+            "updated_at",
+        ]
+
+
+# --------- HELPERS ----------
 
 def sync_farmer_approval_from_lands(farmer: Farmer):
-    """
-    Business rule:
-    - A user is considered a farmer only if they have at least one Land.
-    - Farmer.approval_status is derived from all their lands:
-        - If ANY land is 'pending'  -> farmer = 'pending'
-        - Else if ALL lands are 'approved' -> farmer = 'approved'
-        - Else (no pending, some rejected) -> farmer = 'rejected'
-    """
     lands_qs = farmer.lands.all()
     if not lands_qs.exists():
-        # No lands: keep whatever is set, or treat as pending
         farmer.approval_status = farmer.approval_status or "pending"
         farmer.save(update_fields=["approval_status"])
         return
@@ -30,37 +117,23 @@ def sync_farmer_approval_from_lands(farmer: Farmer):
     elif all(s == "approved" for s in statuses):
         farmer.approval_status = "approved"
     else:
-        # No pending, at least one rejected
         farmer.approval_status = "rejected"
 
     farmer.save(update_fields=["approval_status"])
 
 
+# --------- DASHBOARD ----------
+
 @api_view(["GET"])
+@require_admin_token
 def admin_dashboard(request):
-    """
-    Main admin dashboard stats:
-    - total users
-    - total farmers (ONLY users with at least one Land)
-    - profiles completed
-    - farmers by district (for charts)
-    - approvals summary (by Land)
-    - first 10 pending farmers (for quick view) – based on Land approvals
-    """
-    # Basic counts
     total_users = Account.objects.count()
-
-    # A user is considered a farmer ONLY if they have at least one Land
     farmer_qs = Farmer.objects.filter(lands__isnull=False).distinct()
-
     total_farmers = farmer_qs.count()
     profiles_completed = farmer_qs.exclude(village=None).exclude(village="").count()
 
-    # Farmers per district (among farmers who have lands)
     farmers_by_district_qs = (
-        farmer_qs.values("district")
-        .annotate(count=Count("id"))
-        .order_by("-count")
+        farmer_qs.values("district").annotate(count=Count("id")).order_by("-count")
     )
 
     chart_labels = []
@@ -70,15 +143,9 @@ def admin_dashboard(request):
         chart_labels.append(district)
         chart_values.append(row["count"])
 
-    # ---------- Approval summary (by Land) ----------
-    land_summary = {
-        "Pending": 0,
-        "Approved": 0,
-        "Rejected": 0,
-    }
-
+    land_summary = {"Pending": 0, "Approved": 0, "Rejected": 0}
     for row in Land.objects.values("approval_status").annotate(count=Count("id")):
-        raw_status = row["approval_status"]  # 'pending' / 'approved' / 'rejected'
+        raw_status = row["approval_status"]
         if raw_status == "approved":
             land_summary["Approved"] += row["count"]
         elif raw_status == "rejected":
@@ -86,8 +153,6 @@ def admin_dashboard(request):
         else:
             land_summary["Pending"] += row["count"]
 
-    # ---------- Pending farmers list (based on Land) ----------
-    # Farmer is "pending" if they have ANY pending Land
     pending_farmer_ids = (
         Land.objects.filter(approval_status="pending")
         .values_list("farmer_id", flat=True)
@@ -102,10 +167,6 @@ def admin_dashboard(request):
 
     pending_farmers = []
     for f in pending_qs:
-        # You can also show total land area (sum of lands)
-        total_land_area = (
-            f.lands.aggregate(total=Count("id"))  # or Sum('land_area') if you prefer
-        )
         pending_farmers.append(
             {
                 "id": f.id,
@@ -135,125 +196,47 @@ def admin_dashboard(request):
     )
 
 
-# ----------------- (Optional) OLD farmer approvals – kept for backward compatibility -----------------
-
-
-@api_view(["GET"])
-def farmer_approvals_list(request):
-    """
-    Default: All farmers
-    Filter: ?status=All / Pending / Approved / Rejected
-    WARNING: This is farmer-level, new UI uses land_approvals_list instead.
-    """
-    status_param = request.GET.get("status", "All")
-
-    qs = Farmer.objects.select_related("user").order_by("id")
-
-    if status_param == "Pending":
-        qs = qs.exclude(approval_status="approved").exclude(approval_status="rejected")
-    elif status_param == "Approved":
-        qs = qs.filter(approval_status="approved")
-    elif status_param == "Rejected":
-        qs = qs.filter(approval_status="rejected")
-    # All -> no filter
-
-    data = []
-    for f in qs:
-        data.append(
-            {
-                "id": f.id,
-                "username": getattr(f.user, "username", ""),
-                "name": getattr(f, "name", ""),
-                "phone": getattr(f, "phone", ""),
-                "village": getattr(f, "village", ""),
-                "district": getattr(f, "district", ""),
-                "state": getattr(f, "state", ""),
-                "land_area": getattr(f, "land_area", ""),
-                "approval_status": getattr(f, "approval_status", "") or "pending",
-                "admin_remark": getattr(f, "admin_remark", "") or "",
-            }
-        )
-
-    return Response(data)
-
-
-@api_view(["PATCH"])
-def farmer_approval_update(request, farmer_id):
-    """
-    Update approval_status and admin_remark for a farmer.
-    (Not used by the new Land approvals UI)
-    """
-    try:
-        farmer = Farmer.objects.get(id=farmer_id)
-    except Farmer.DoesNotExist:
-        return Response(
-            {"detail": "Farmer not found"}, status=status.HTTP_404_NOT_FOUND
-        )
-
-    approval_status = request.data.get("approval_status")
-    admin_remark = request.data.get("admin_remark")
-
-    if approval_status:
-        farmer.approval_status = approval_status
-    if admin_remark is not None:
-        farmer.admin_remark = admin_remark
-
-    farmer.save()
-
-    return Response(
-        {
-            "message": "Approval updated",
-            "approval_status": farmer.approval_status,
-            "admin_remark": farmer.admin_remark or "",
-        }
-    )
-
-
-# ----------------- NEW: LAND-BASED approvals (used by React Approvals page) -----------------
-
+# --------- LAND APPROVALS ----------
 
 @api_view(["GET"])
+@require_admin_token
 def land_approvals_list(request):
-    """
-    Returns one row per Land, with farmer info and land approval_status.
-    Filter: ?status=All / Pending / Approved / Rejected
-    """
     status_param = request.GET.get("status", "All")
 
     qs = Land.objects.select_related("farmer__user").order_by("id")
 
-    if status_param == "Pending":
+    if status_param == "pending":
         qs = qs.exclude(approval_status="approved").exclude(approval_status="rejected")
-    elif status_param == "Approved":
+    elif status_param == "approved":
         qs = qs.filter(approval_status="approved")
-    elif status_param == "Rejected":
+    elif status_param == "rejected":
         qs = qs.filter(approval_status="rejected")
-    # All -> no filter
 
     data = []
     for land in qs:
         farmer = land.farmer
         user = getattr(farmer, "user", None)
 
-        full_name = ""
         if user:
-            full_name = (
+            farmer_name = (
                 user.get_full_name()
                 or getattr(farmer, "name", "")
                 or user.username
             )
+        else:
+            farmer_name = getattr(farmer, "name", "") if farmer else ""
 
         data.append(
             {
                 "id": land.id,
-                "farmer_name": full_name,
-                "farmer_username": getattr(user, "username", ""),
-                "farmer_phone": getattr(farmer, "phone", ""),
-                "village": land.village,
-                "district": land.district,
-                "state": land.state,
-                "land_area": land.land_area,
-                "approval_status": land.approval_status,  # 'pending' / 'approved' / 'rejected'
+                "farmer_name": farmer_name,
+                "farmer_username": getattr(user, "username", "") if user else "",
+                "farmer_phone": getattr(farmer, "phone", "") if farmer else "",
+                "village": land.village or "",
+                "district": land.district or "",
+                "state": land.state or "",
+                "land_area": float(land.land_area or 0),
+                "approval_status": land.approval_status or "pending",
                 "admin_remark": land.admin_remark or "",
             }
         )
@@ -261,12 +244,10 @@ def land_approvals_list(request):
     return Response(data)
 
 
+@csrf_exempt
 @api_view(["PATCH"])
+@require_admin_token
 def land_approval_update(request, land_id):
-    """
-    Update approval_status and admin_remark for a Land.
-    Also sync the parent Farmer's approval_status based on all lands.
-    """
     try:
         land = Land.objects.select_related("farmer__user").get(id=land_id)
     except Land.DoesNotExist:
@@ -278,13 +259,11 @@ def land_approval_update(request, land_id):
     admin_remark = request.data.get("admin_remark")
 
     if approval_status:
-        land.approval_status = approval_status  # 'pending'/'approved'/'rejected'
+        land.approval_status = approval_status
     if admin_remark is not None:
         land.admin_remark = admin_remark
 
     land.save()
-
-    # 🔁 Sync farmer status from all its lands (business rule)
     sync_farmer_approval_from_lands(land.farmer)
 
     return Response(
@@ -294,3 +273,133 @@ def land_approval_update(request, land_id):
             "admin_remark": land.admin_remark or "",
         }
     )
+
+
+# --------- CROP PLAN APPROVALS ----------
+
+def serialize_crop_plan_for_approval(plan: CropPlan):
+    farmer = getattr(plan, "farmer", None)
+    user = getattr(farmer, "user", None)
+    land = getattr(plan, "land", None)
+
+    if user:
+        farmer_name = user.get_full_name() or getattr(farmer, "name", "") or user.username
+    else:
+        farmer_name = getattr(farmer, "name", "") if farmer else ""
+
+    farmer_username = getattr(user, "username", "") if user else ""
+    farmer_phone = getattr(farmer, "phone", "") if farmer else ""
+
+    allocations = CropAllocation.objects.filter(crop_plan=plan)
+    if allocations.exists():
+        crop_names = sorted({a.crop_name for a in allocations if a.crop_name})
+        if not crop_names:
+            crop_label = f"Crop plan #{plan.id}"
+        elif len(crop_names) == 1:
+            crop_label = crop_names[0]
+        else:
+            crop_label = " + ".join(crop_names[:3])
+            if len(crop_names) > 3:
+                crop_label += f" (+{len(crop_names) - 3} more)"
+    else:
+        crop_label = f"Crop plan #{plan.id}"
+
+    planned_area = getattr(plan, "total_acres_allocated", None)
+    if planned_area is None:
+        if allocations.exists():
+            planned_area = (
+                allocations.aggregate(total=Sum("acres")).get("total") or 0
+            )
+        elif land is not None:
+            planned_area = land.land_area
+        else:
+            planned_area = 0
+
+    return {
+        "id": plan.id,
+        "farmer_name": farmer_name,
+        "farmer_username": farmer_username,
+        "farmer_phone": farmer_phone,
+        "village": getattr(land, "village", "") if land else "",
+        "district": getattr(land, "district", "") if land else "",
+        "state": getattr(land, "state", "") if land else "",
+        "crop_name": crop_label,
+        "season": getattr(plan, "season", "") or "",
+        "planned_area": float(planned_area or 0),
+        "approval_status": getattr(plan, "approval_status", "") or "pending",
+        "admin_remark": getattr(plan, "admin_remark", "") or "",
+    }
+
+
+@api_view(["GET"])
+@require_admin_token
+def crop_plan_approvals_list(request):
+    status_param = request.GET.get("status", "All")
+
+    qs = CropPlan.objects.select_related("farmer__user", "land").order_by("id")
+
+    if status_param == "pending":
+        qs = qs.exclude(approval_status="approved").exclude(
+            approval_status="rejected"
+        )
+    elif status_param == "approved":
+        qs = qs.filter(approval_status="approved")
+    elif status_param == "rejected":
+        qs = qs.filter(approval_status="rejected")
+
+    data = [serialize_crop_plan_for_approval(plan) for plan in qs]
+    return Response(data)
+
+
+@csrf_exempt
+@api_view(["PATCH"])
+@require_admin_token
+def crop_plan_approval_update(request, plan_id):
+    try:
+        plan = CropPlan.objects.get(id=plan_id)
+    except CropPlan.DoesNotExist:
+        return Response(
+            {"detail": "Crop plan not found"},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    approval_status = request.data.get("approval_status")
+    admin_remark = request.data.get("admin_remark")
+
+    if approval_status:
+        plan.approval_status = approval_status
+    if admin_remark is not None:
+        plan.admin_remark = admin_remark
+
+    plan.save()
+
+    return Response(
+        {
+            "message": "Crop plan approval updated",
+            "approval_status": plan.approval_status,
+            "admin_remark": plan.admin_remark or "",
+        }
+    )
+
+
+# --------- NEWS LIST + CREATE ----------
+
+@api_view(["GET", "POST"])
+@csrf_exempt
+@require_admin_token
+def news_list_create(request):
+    """
+    GET  -> list news items
+    POST -> create a news item
+    """
+    if request.method == "GET":
+        qs = News.objects.all().order_by("-created_at")
+        serializer = NewsSerializer(qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    # POST
+    serializer = NewsSerializer(data=request.data)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Farmer, Land, News, CropPlan, CropAllocation
+from .models import Farmer, Land, News, CropPlan, CropAllocation, CropYieldConfig
 
 
 @admin.register(Farmer)
@@ -28,3 +28,18 @@ class CropPlanAdmin(admin.ModelAdmin):
 class CropAllocationAdmin(admin.ModelAdmin):
     list_display = ("crop_plan", "crop_name", "acres", "seed_variety", "sowing_date")
     search_fields = ("crop_name", "seed_variety")
+
+
+@admin.register(CropYieldConfig)
+class CropYieldConfigAdmin(admin.ModelAdmin):
+    list_display = (
+        "crop_name",
+        "soil_type",
+        "season",
+        "irrigation_type",
+        "yield_quintals_per_acre",
+        "is_active",
+        "updated_at",
+    )
+    list_filter = ("soil_type", "season", "irrigation_type", "is_active")
+    search_fields = ("crop_name",)

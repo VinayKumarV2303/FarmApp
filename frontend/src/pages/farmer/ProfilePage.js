@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from "react";
+// src/pages/farmer/ProfilePage.js
+import React, { useEffect, useState, useMemo } from "react";
 import {
   Box,
   Grid,
@@ -8,21 +9,18 @@ import {
   Stack,
   Chip,
   Avatar,
-  Divider,
   useMediaQuery,
   useTheme,
   Skeleton,
 } from "@mui/material";
-import AgricultureIcon from "@mui/icons-material/Agriculture";
-import LocationOnIcon from "@mui/icons-material/LocationOn";
 import LandscapeIcon from "@mui/icons-material/Landscape";
 import GrainIcon from "@mui/icons-material/Grain";
-import WarningAmberIcon from "@mui/icons-material/WarningAmber";
 import { useAuth } from "../../context/AuthContext";
 import api from "../../api/axios";
 
 const getStatusColor = (status) => {
-  switch (status) {
+  const s = (status || "").toLowerCase();
+  switch (s) {
     case "approved":
       return "success";
     case "rejected":
@@ -42,7 +40,6 @@ const ProfilePage = () => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
 
-  // ===== Load profile from /farmer/profile/ =====
   useEffect(() => {
     if (!user || authLoading) return;
 
@@ -50,8 +47,6 @@ const ProfilePage = () => {
       try {
         setLoading(true);
         const res = await api.get("/farmer/profile/");
-        console.log("PROFILE DATA:", res.data);
-
         setLands(res.data.lands || []);
         setCropPlans(res.data.crop_plans || []);
       } catch (err) {
@@ -64,20 +59,48 @@ const ProfilePage = () => {
     fetchProfile();
   }, [user, authLoading]);
 
-  if (!user) return <Typography sx={{ mt: 2 }}>Please login again.</Typography>;
-
-  // -----------------------
-  // Summary calculations
-  // -----------------------
-  const approvedLands = lands.filter((l) => l.approval_status === "approved");
+  // approved lands, sorted
+  const approvedLands = useMemo(
+    () =>
+      lands
+        .filter(
+          (l) => (l.approval_status || "").toLowerCase() === "approved"
+        )
+        .sort((a, b) => {
+          const ta = new Date(a.created_at || 0).getTime();
+          const tb = new Date(b.created_at || 0).getTime();
+          if (!Number.isNaN(ta) && !Number.isNaN(tb) && ta !== tb) {
+            return ta - tb;
+          }
+          return (a.id || 0) - (b.id || 0);
+        }),
+    [lands]
+  );
 
   const totalLandArea = approvedLands.reduce(
     (sum, l) => sum + (Number(l.land_area) || 0),
     0
   );
 
-  const totalPlannedArea = cropPlans.reduce(
-    (sum, p) => sum + (Number(p.total_acres_allocated) || 0),
+  // only approved crop plans
+  const approvedCropPlans = useMemo(
+    () =>
+      cropPlans.filter(
+        (c) => (c.approval_status || "").toLowerCase() === "approved"
+      ),
+    [cropPlans]
+  );
+
+  const totalPlannedArea = approvedCropPlans.reduce(
+    (sum, c) =>
+      sum +
+      (Number(
+        c.acres ??
+          c.area ??
+          c.planned_area ??
+          c.total_acres_allocated ??
+          0
+      ) || 0),
     0
   );
 
@@ -89,9 +112,18 @@ const ProfilePage = () => {
     .slice(0, 2)
     .toUpperCase();
 
-  // -----------------------
-  // Loading skeleton
-  // -----------------------
+  // group approved crops by land id
+  const cropsByLand = useMemo(() => {
+    const groups = {};
+    approvedCropPlans.forEach((c) => {
+      const landId = c.land_id;
+      if (!landId) return;
+      if (!groups[landId]) groups[landId] = [];
+      groups[landId].push(c);
+    });
+    return groups;
+  }, [approvedCropPlans]);
+
   const ProfileSkeleton = () => (
     <Card sx={{ mb: 3, borderRadius: 3, boxShadow: 2 }}>
       <CardContent>
@@ -106,17 +138,23 @@ const ProfilePage = () => {
     </Card>
   );
 
-  if (loading || authLoading) return <ProfileSkeleton />;
+  if (!user) {
+    return <Typography sx={{ mt: 2 }}>Please login again.</Typography>;
+  }
+
+  if (loading || authLoading) {
+    return <ProfileSkeleton />;
+  }
 
   return (
     <Box>
-      {/* HEADER Profile Card */}
+      {/* Header card */}
       <Card
         sx={{
           mb: 3,
           borderRadius: 3,
           boxShadow: 2,
-          background: "linear-gradient(135deg, #e3f2fd 0%, #e8f5e9 100%)",
+          background: "linear-gradient(135deg, #e3f2fd, #e8f5e9)",
         }}
       >
         <CardContent>
@@ -149,12 +187,14 @@ const ProfilePage = () => {
               <Stack direction="row" spacing={1} sx={{ mt: 1 }} flexWrap="wrap">
                 <Chip
                   size="small"
-                  label={`Total land (approved): ${totalLandArea} acres`}
+                  label={`Approved land: ${totalLandArea} acres`}
                   icon={<LandscapeIcon sx={{ fontSize: "1rem" }} />}
                 />
                 <Chip
                   size="small"
-                  label={`Planned area: ${totalPlannedArea} acres`}
+                  label={`Crops planned: ${totalPlannedArea.toFixed(
+                    2
+                  )} acres`}
                   icon={<GrainIcon sx={{ fontSize: "1rem" }} />}
                 />
               </Stack>
@@ -167,75 +207,31 @@ const ProfilePage = () => {
               </Stack>
 
               <Stack spacing={0.3}>
-                <Typography variant="caption">Crop Plans</Typography>
-                <Typography variant="body2">{cropPlans.length}</Typography>
+                <Typography variant="caption">
+                  Approved crop entries
+                </Typography>
+                <Typography variant="body2">
+                  {approvedCropPlans.length}
+                </Typography>
               </Stack>
             </Stack>
           </Stack>
         </CardContent>
       </Card>
 
-      {/* -------- Main panels -------- */}
+      {/* Crops grouped by land */}
       <Grid container spacing={3}>
-        {/* 🥬 Crop Details */}
-        <Grid item xs={12} md={6}>
+        <Grid item xs={12}>
           <Card sx={{ borderRadius: 3, boxShadow: 1 }}>
             <CardContent>
               <Stack
                 direction="row"
                 alignItems="center"
-                justifyContent="space-between"
+                spacing={1}
                 sx={{ mb: 1.5 }}
               >
-                <Stack direction="row" spacing={1} alignItems="center">
-                  <GrainIcon fontSize="small" />
-                  <Typography variant="h6">Crop Details</Typography>
-                </Stack>
-                <Chip label={`${cropPlans.length} plans`} size="small" />
-              </Stack>
-
-              {cropPlans.length === 0 ? (
-                <Typography color="text.secondary">
-                  No crop plans added yet. Add crop plans from your dashboard.
-                </Typography>
-              ) : (
-                <Stack spacing={1.5}>
-                  {cropPlans.map((p) => (
-                    <Card key={p.id} variant="outlined" sx={{ borderRadius: 2 }}>
-                      <CardContent sx={{ py: 1.5 }}>
-                        <Typography sx={{ fontWeight: 600 }}>
-                          Season: {p.season}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary">
-                          Total acres: {p.total_acres_allocated}
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  ))}
-                </Stack>
-              )}
-            </CardContent>
-          </Card>
-        </Grid>
-
-        {/* 🚜 Land Details */}
-        <Grid item xs={12} md={6}>
-          <Card sx={{ borderRadius: 3, boxShadow: 1 }}>
-            <CardContent>
-              <Stack
-                direction="row"
-                alignItems="center"
-                justifyContent="space-between"
-                sx={{ mb: 1.5 }}
-              >
-                <Stack direction="row" spacing={1}>
-                  <AgricultureIcon fontSize="small" />
-                  <Typography variant="h6">Land Details</Typography>
-                </Stack>
-                <Chip
-                  label={`${approvedLands.length} approved`}
-                  size="small"
-                />
+                <GrainIcon fontSize="small" />
+                <Typography variant="h6">Crop Details</Typography>
               </Stack>
 
               {approvedLands.length === 0 ? (
@@ -243,39 +239,132 @@ const ProfilePage = () => {
                   No approved lands yet.
                 </Typography>
               ) : (
-                <Stack spacing={1.5}>
-                  {approvedLands.map((l) => (
-                    <Card key={l.id} variant="outlined" sx={{ borderRadius: 2 }}>
-                      <CardContent sx={{ py: 1.5 }}>
-                        <Stack
-                          direction="row"
-                          justifyContent="space-between"
-                          sx={{ mb: 1 }}
-                        >
-                          <Typography variant="subtitle1" fontWeight={600}>
-                            Land #{l.id}
-                          </Typography>
-                          <Chip
-                            size="small"
-                            label={l.approval_status}
-                            color={getStatusColor(l.approval_status)}
-                          />
-                        </Stack>
+                <Stack spacing={2}>
+                  {approvedLands.map((land, landIndex) => {
+                    const crops = cropsByLand[land.id] || [];
+                    const landStatusRaw = (
+                      land.approval_status || "approved"
+                    ).toLowerCase();
+                    const landStatusLabel =
+                      landStatusRaw.charAt(0).toUpperCase() +
+                      landStatusRaw.slice(1);
 
-                        <Typography variant="body2">
-                          Village: {l.village}
-                        </Typography>
-                        <Typography variant="body2">
-                          District: {l.district}
-                        </Typography>
-                        <Typography variant="body2">State: {l.state}</Typography>
-                        <Divider sx={{ my: 1 }} />
-                        <Typography variant="body2">
-                          Area: {l.land_area} acres
-                        </Typography>
-                      </CardContent>
-                    </Card>
-                  ))}
+                    return (
+                      <Card
+                        key={land.id}
+                        variant="outlined"
+                        sx={{ borderRadius: 2 }}
+                      >
+                        <CardContent sx={{ py: 1.5 }}>
+                          {/* Land header */}
+                          <Box
+                            sx={{
+                              bgcolor: "#e3f2fd",
+                              p: 1.5,
+                              borderRadius: 2,
+                              border: "1px solid #bbdefb",
+                              mb: 1.5,
+                            }}
+                          >
+                            <Stack
+                              direction="row"
+                              justifyContent="space-between"
+                              alignItems="center"
+                            >
+                              <Box>
+                                <Typography
+                                  variant="subtitle1"
+                                  fontWeight={700}
+                                  sx={{ color: "#0d47a1" }}
+                                >
+                                  Land #{landIndex + 1}
+                                </Typography>
+                                <Typography
+                                  variant="body2"
+                                  sx={{ color: "#01579b", fontWeight: 500 }}
+                                >
+                                  {land.village || "-"},{" "}
+                                  {land.district || ""} {land.state || ""}
+                                </Typography>
+                              </Box>
+
+                              <Stack
+                                direction="row"
+                                spacing={1}
+                                alignItems="center"
+                              >
+                                <Chip
+                                  size="small"
+                                  label={landStatusLabel}
+                                  color={getStatusColor(landStatusRaw)}
+                                  sx={{ fontWeight: 600 }}
+                                />
+                                <Chip
+                                  size="small"
+                                  variant="outlined"
+                                  label={`${crops.length} crop${
+                                    crops.length === 1 ? "" : "s"
+                                  }`}
+                                  sx={{ fontWeight: 600 }}
+                                />
+                              </Stack>
+                            </Stack>
+                          </Box>
+
+                          {/* Crops inside this land */}
+                          {crops.length === 0 ? (
+                            <Typography
+                              variant="body2"
+                              color="text.secondary"
+                            >
+                              No approved crop plans yet for this land.
+                            </Typography>
+                          ) : (
+                            <Stack spacing={1}>
+                              {crops.map((c) => {
+                                const acres =
+                                  c.acres ??
+                                  c.area ??
+                                  c.planned_area ??
+                                  c.total_acres_allocated ??
+                                  0;
+
+                                return (
+                                  <Stack
+                                    key={c.id}
+                                    direction="row"
+                                    justifyContent="space-between"
+                                    alignItems="center"
+                                  >
+                                    <Box>
+                                      {/* Crop name only */}
+                                      <Typography sx={{ fontWeight: 700 }}>
+                                        {c.crop_name || "Crop"}
+                                      </Typography>
+
+                                      <Typography
+                                        variant="body2"
+                                        color="text.secondary"
+                                      >
+                                        {Number(acres).toFixed(2)} acres
+                                        {c.season ? ` • ${c.season}` : ""}
+                                      </Typography>
+                                    </Box>
+
+                                    <Chip
+                                      size="small"
+                                      label="Approved"
+                                      color="success"
+                                    />
+                                  </Stack>
+                                );
+                              })}
+                            </Stack>
+                          )}
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
                 </Stack>
               )}
             </CardContent>

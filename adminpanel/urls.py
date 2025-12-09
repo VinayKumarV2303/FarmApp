@@ -1,36 +1,46 @@
+# adminpanel/urls.py
 from django.urls import path
 from .views import (
     admin_dashboard,
-    farmer_approvals_list,
-    farmer_approval_update,
     land_approvals_list,
     land_approval_update,
+    crop_plan_approvals_list,
+    crop_plan_approval_update,
+    news_list_create,  # ✅ new
 )
 
 urlpatterns = [
-    path("api/dashboard/", admin_dashboard, name="admin_dashboard_api"),
+    # Admin dashboard stats
+    path("api/dashboard/", admin_dashboard, name="admin-dashboard"),
 
-    # Old farmer-level approvals
-    path(
-        "api/approvals/farmers/",
-        farmer_approvals_list,
-        name="farmer_approvals_list",
-    ),
-    path(
-        "api/approvals/farmers/<int:farmer_id>/",
-        farmer_approval_update,
-        name="farmer_approval_update",
-    ),
-
-    # NEW: LAND-level approvals (used by React Approvals page)
+    # Land approvals
     path(
         "api/approvals/lands/",
         land_approvals_list,
-        name="land_approvals_list",
+        name="admin-land-approvals-list",
     ),
     path(
         "api/approvals/lands/<int:land_id>/",
         land_approval_update,
-        name="land_approval_update",
+        name="admin-land-approval-update",
+    ),
+
+    # Crop plan approvals
+    path(
+        "api/approvals/crop-plans/",
+        crop_plan_approvals_list,
+        name="admin-crop-approvals-list",
+    ),
+    path(
+        "api/approvals/crop-plans/<int:plan_id>/",
+        crop_plan_approval_update,
+        name="admin-crop-approval-update",
+    ),
+
+    # News (admin)
+    path(
+        "api/news/",
+        news_list_create,
+        name="admin-news-list-create",
     ),
 ]
