@@ -30,22 +30,8 @@ class LandSerializer(serializers.ModelSerializer):
 class NewsSerializer(serializers.ModelSerializer):
     class Meta:
         model = News
-        fields = [
-            "id",
-            "title",
-            "summary",
-            "content",
-            "image_url",
-            "url",
-            "tags",
-            "is_important",
-            "is_active",
-            "status",
-            "created_at",
-            "updated_at",
-        ]
-
-
+        fields = '__all__'
+        read_only_fields = ['id']
 
 class CropAllocationSerializer(serializers.ModelSerializer):
     class Meta:
@@ -95,7 +81,6 @@ class CropPlanSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         ]
-
 
     def create(self, validated_data):
         crops_data = validated_data.pop("crops", [])

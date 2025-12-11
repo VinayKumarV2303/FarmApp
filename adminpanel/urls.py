@@ -1,46 +1,16 @@
 # adminpanel/urls.py
 from django.urls import path
-from .views import (
-    admin_dashboard,
-    land_approvals_list,
-    land_approval_update,
-    crop_plan_approvals_list,
-    crop_plan_approval_update,
-    news_list_create,  # ✅ new
-)
+from . import views
+
+app_name = "adminpanel"
 
 urlpatterns = [
-    # Admin dashboard stats
-    path("api/dashboard/", admin_dashboard, name="admin-dashboard"),
+    # keep admin dashboard UI route
+    path("dashboard/", views.admin_dashboard, name="admin_dashboard"),
 
-    # Land approvals
-    path(
-        "api/approvals/lands/",
-        land_approvals_list,
-        name="admin-land-approvals-list",
-    ),
-    path(
-        "api/approvals/lands/<int:land_id>/",
-        land_approval_update,
-        name="admin-land-approval-update",
-    ),
-
-    # Crop plan approvals
-    path(
-        "api/approvals/crop-plans/",
-        crop_plan_approvals_list,
-        name="admin-crop-approvals-list",
-    ),
-    path(
-        "api/approvals/crop-plans/<int:plan_id>/",
-        crop_plan_approval_update,
-        name="admin-crop-approval-update",
-    ),
-
-    # News (admin)
-    path(
-        "api/news/",
-        news_list_create,
-        name="admin-news-list-create",
-    ),
+    # API routes (use explicit /api/ prefix)
+    path("api/approvals/lands/", views.approvals_lands, name="approvals_lands"),
+    path("api/approvals/crop-plans/", views.approvals_crop_plans, name="approvals_crop_plans"),
+    path("api/news/", views.news_list_create, name="news_list_create"),           # GET / POST
+    path("api/news/<int:pk>/", views.news_delete, name="news_delete"),           # DELETE
 ]

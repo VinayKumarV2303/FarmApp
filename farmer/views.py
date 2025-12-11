@@ -12,12 +12,14 @@ from rest_framework.decorators import (
     api_view,
     permission_classes,
     authentication_classes,
+    parser_classes,
 )
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework import status, generics
 from rest_framework.authtoken.models import Token
 from rest_framework.authentication import TokenAuthentication
+from rest_framework.parsers import MultiPartParser, FormParser
 
 from django.db.models import Sum
 
@@ -164,7 +166,7 @@ def verify_otp_view(request):
     mode = "login" | "signup"  (default: "login")
 
     - login: DO NOT create new farmer/user.
-             If not found => 404.
+             If missing => 404.
     - signup: Create new user + farmer if not exists.
               If already exists => 400.
     """
@@ -400,114 +402,6 @@ class LandDetailView(generics.RetrieveUpdateDestroyAPIView):
 
 
 # =========================
-# LOCATION HELPERS
-# =========================
-@api_view(["GET"])
-@authentication_classes([TokenAuthentication])
-@permission_classes([IsAuthenticated])
-def pincode_lookup_view(request):
-    pincode = (request.query_params.get("pincode") or "").strip()
-    if not pincode or len(pincode) != 6:
-        return Response({"detail": "Valid 6-digit pincode required"}, status=400)
-
-    LOCAL_PINCODE_MAP = {
-        "563101": {"district": "Kolar", "state": "Karnataka"},
-    }
-
-    if pincode in LOCAL_PINCODE_MAP:
-        data = LOCAL_PINCODE_MAP[pincode]
-        return Response(
-            {"pincode": pincode, "district": data["district"], "state": data["state"]}
-        )
-
-    try:
-        resp = requests.get(
-            f"https://api.postalpincode.in/pincode/{pincode}",
-            timeout=5,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-
-        if not data or data[0].get("Status") != "Success":
-            return Response({"detail": "Pincode not found"}, status=404)
-
-        po_list = data[0].get("PostOffice") or []
-        if not po_list:
-            return Response({"detail": "Pincode not found"}, status=404)
-
-        po = po_list[0]
-        district = po.get("District") or ""
-        state = po.get("State") or ""
-
-        if not district and not state:
-            return Response({"detail": "Pincode not found"}, status=404)
-
-        return Response(
-            {"pincode": pincode, "district": district, "state": state}
-        )
-    except Exception as e:
-        print("Pincode lookup error:", e)
-        return Response(
-            {"detail": "Lookup failed"},
-            status=status.HTTP_502_BAD_GATEWAY,
-        )
-
-
-@api_view(["GET"])
-@authentication_classes([TokenAuthentication])
-@permission_classes([IsAuthenticated])
-def reverse_geocode_view(request):
-    lat = request.query_params.get("lat")
-    lng = request.query_params.get("lng")
-
-    if not lat or not lng:
-        return Response({"detail": "lat and lng required"}, status=400)
-
-    try:
-        resp = requests.get(
-            "https://nominatim.openstreetmap.org/reverse",
-            params={
-                "lat": lat,
-                "lon": lng,
-                "format": "jsonv2",
-                "addressdetails": 1,
-            },
-            headers={"User-Agent": "alpha-farm-app/1.0"},
-            timeout=5,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        addr = data.get("address") or {}
-
-        village = (
-            addr.get("village")
-            or addr.get("hamlet")
-            or addr.get("suburb")
-            or ""
-        )
-        district = addr.get("district") or addr.get("county") or ""
-        state = addr.get("state") or ""
-        pincode = addr.get("postcode") or ""
-
-        return Response(
-            {
-                "village": village,
-                "district": district,
-                "state": state,
-                "pincode": pincode,
-                "latitude": float(lat),
-                "longitude": float(lng),
-            }
-        )
-    except Exception as e:
-        print("Reverse geocode error:", e)
-        return Response(
-            {"detail": "Location lookup failed"},
-            status=status.HTTP_502_BAD_GATEWAY,
-        )
-
-
-# =========================
 # CROP PLAN VIEWS
 # =========================
 class CropPlanListCreateView(generics.ListCreateAPIView):
@@ -516,107 +410,35 @@ class CropPlanListCreateView(generics.ListCreateAPIView):
     serializer_class = CropPlanSerializer
 
     def get_queryset(self):
-        return CropPlan.objects.filter(
-            farmer=self.request.user.farmer
-        ).order_by("-created_at")
-
-    def create(self, request, *args, **kwargs):
-        land_id = request.data.get("land_id")
-        if not land_id:
-            return Response({"detail": "land_id required"}, status=400)
-
-        try:
-            land = Land.objects.get(id=land_id, farmer=request.user.farmer)
-        except Land.DoesNotExist:
-            return Response({"detail": "Invalid land"}, status=400)
-
-        if (land.approval_status or "").lower() != "approved":
-            return Response(
-                {"detail": "Land not approved yet"},
-                status=403,
-            )
-
-        crops = request.data.get("crops", []) or []
-
-        crop_sum = 0.0
-        for c in crops:
-            try:
-                crop_sum += float(c.get("acres", 0) or 0)
-            except (TypeError, ValueError):
-                pass
-
-        existing_total = (
-            CropPlan.objects.filter(farmer=self.request.user.farmer, land=land)
-            .aggregate(total=Sum("total_acres_allocated"))
-            .get("total")
-            or 0
+        return CropPlan.objects.filter(farmer=self.request.user.farmer).order_by(
+            "-created_at"
         )
 
-        remaining_allowed = float(land.land_area or 0) - float(existing_total)
+    def perform_create(self, serializer):
+        farmer = self.request.user.farmer
+        land = serializer.validated_data.get("land")
 
-        if crop_sum > remaining_allowed:
-            return Response(
-                {
-                    "detail": "Total crop allocation exceeds limit",
-                    "allowed_remaining": remaining_allowed,
-                    "requested": crop_sum,
-                    "already_planned": float(existing_total),
-                },
-                status=400,
-            )
+        crops_data = serializer.initial_data.get("crops") or []
+        crop_sum = sum(
+            Decimal(str(c.get("acres") or 0)) for c in crops_data
+        )
 
-        request.data["total_acres_allocated"] = crop_sum
+        serializer.save(
+            farmer=farmer,
+            land=land,
+            total_acres_allocated=crop_sum,
+        )
 
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        plan = serializer.save(farmer=self.request.user.farmer, land=land)
-
-        plan.approval_status = "pending"
-        plan.save()
-
-        allocations = []
-        for c in crops:
-            name = c.get("crop_name") or c.get("name") or ""
-            acres_raw = c.get("acres") or 0
-
-            try:
-                acres_val = Decimal(str(acres_raw))
-            except Exception:
-                acres_val = Decimal("0")
-
-            if not name or acres_val <= 0:
-                continue
-
-            allocations.append(
-                CropAllocation(
-                    crop_plan=plan,
-                    crop_name=name,
-                    acres=acres_val,
-                )
-            )
-
-        if allocations:
-            CropAllocation.objects.bulk_create(allocations)
-
-        season_value = plan.season
-        season_instance = None
-        if isinstance(season_value, Season):
-            season_instance = season_value
-        elif season_value:
-            season_instance = Season.objects.filter(name=season_value).first()
-
-        if season_instance is not None:
-            FarmerCropPlan.objects.create(
-                farmer=self.request.user.farmer,
+        # Optional: also mirror in FarmerCropPlan for recommendation
+        if land is not None:
+            FarmerCropPlan.objects.update_or_create(
+                farmer=farmer,
                 land=land,
-                season=season_instance,
-                soil_type=plan.soil_type,
-                irrigation_type=plan.irrigation_type,
-                total_acres_allocated=crop_sum,
+                defaults={
+                    "season": serializer.validated_data.get("season", ""),
+                    "total_area": crop_sum,
+                },
             )
-
-        return Response(serializer.data, status=201)
 
 
 class CropPlanDetailView(generics.RetrieveUpdateDestroyAPIView):
@@ -664,29 +486,39 @@ def reject_crop_plan(request, pk):
 
 
 # =========================
-# ADMIN — Manage News
+# ADMIN — Manage News (with image upload, auto-approve)
 # =========================
 @api_view(["GET", "POST"])
+@authentication_classes([TokenAuthentication])
 @permission_classes([IsAuthenticated])
+@parser_classes([MultiPartParser, FormParser])
 def admin_news_list_create_view(request):
+    """
+    GET  -> list all news for admin UI
+    POST -> create news; auto mark as APPROVED + ACTIVE.
+            Supports multipart/form-data with image upload.
+    """
     if request.method == "GET":
         qs = News.objects.all().order_by("-created_at")
         serializer = NewsSerializer(qs, many=True)
         return Response(serializer.data)
 
-    data = request.data.copy()
-    if hasattr(News, "STATUS_PENDING"):
-        data["status"] = News.STATUS_PENDING
+    # POST: create news from admin UI
+    serializer = NewsSerializer(data=request.data)
 
-    serializer = NewsSerializer(data=data)
     if serializer.is_valid():
-        news = serializer.save()
+        # Force newly created news to be APPROVED + ACTIVE
+        news = serializer.save(
+            status=getattr(News, "STATUS_APPROVED", "approved"),
+            is_active=True,
+        )
         return Response(NewsSerializer(news).data, status=201)
 
     return Response(serializer.errors, status=400)
 
 
 @api_view(["POST"])
+@authentication_classes([TokenAuthentication])
 @permission_classes([IsAuthenticated])
 def admin_news_approve_view(request, pk):
     try:
@@ -702,6 +534,7 @@ def admin_news_approve_view(request, pk):
 
 
 @api_view(["POST"])
+@authentication_classes([TokenAuthentication])
 @permission_classes([IsAuthenticated])
 def admin_news_reject_view(request, pk):
     try:
@@ -783,79 +616,132 @@ def yield_estimate_view(request):
         except Exception as e:
             print("Yield external API error:", e)
 
-    db_yield_per_acre = None
-    db_source = None
-
-    if external_yield_per_acre is None:
-        qs = CropYieldConfig.objects.filter(
-            crop_name=crop,
-            is_active=True,
-        )
-
-        def pick_config():
-            cfg = qs.filter(
-                soil_type=soil_type or "",
-                season=season or "",
-                irrigation_type=irrigation_type or "",
-            ).first()
-            if cfg:
-                return cfg
-
-            cfg = qs.filter(
-                soil_type=soil_type or "",
-                season=season or "",
-                irrigation_type="",
-            ).first()
-            if cfg:
-                return cfg
-
-            cfg = qs.filter(
-                soil_type=soil_type or "",
-                season="",
-                irrigation_type="",
-            ).first()
-            if cfg:
-                return cfg
-
-            return qs.filter(
-                soil_type="",
-                season="",
-                irrigation_type="",
-            ).first()
-
-        cfg = pick_config()
-        if cfg is not None:
-            db_yield_per_acre = float(cfg.yield_quintals_per_acre)
-            db_source = "db_crop_yield_config"
-
     if external_yield_per_acre is not None:
-        yield_per_acre = float(external_yield_per_acre)
-        source_used = external_source or "external_api"
-    elif db_yield_per_acre is not None:
-        yield_per_acre = db_yield_per_acre
-        source_used = db_source
+        base_yield = float(external_yield_per_acre)
     else:
-        base_per_acre = BASE_YIELD_PER_ACRE.get(crop, 5.0)
-        soil_factor = SOIL_YIELD_FACTOR.get(soil_type, 1.0)
-        season_factor = SEASON_YIELD_FACTOR.get(season, 1.0)
-        irrigation_factor = IRRIGATION_YIELD_FACTOR.get(irrigation_type, 1.0)
+        base_yield = BASE_YIELD_PER_ACRE.get(crop, 10.0)
 
-        yield_per_acre = (
-            base_per_acre * soil_factor * season_factor * irrigation_factor
-        )
-        source_used = "local_fallback_table"
+    soil_factor = SOIL_YIELD_FACTOR.get(soil_type or "", 1.0)
+    season_factor = SEASON_YIELD_FACTOR.get(season or "", 1.0)
+    irrigation_factor = IRRIGATION_YIELD_FACTOR.get(irrigation_type or "", 1.0)
 
-    expected_yield = round(yield_per_acre * acres, 1)
+    per_acre = base_yield * soil_factor * season_factor * irrigation_factor
+    total_yield = per_acre * acres
 
     return Response(
         {
             "crop": crop,
-            "district": district,
-            "state": state,
             "acres": acres,
-            "yield_per_acre": round(yield_per_acre, 2),
-            "expected_yield": expected_yield,
-            "unit": "quintals",
-            "source": source_used,
+            "yield_quintals_per_acre": round(per_acre, 2),
+            "expected_yield": round(total_yield, 2),
+            "soil_factor": soil_factor,
+            "season_factor": season_factor,
+            "irrigation_factor": irrigation_factor,
+            "external_source": external_source,
         }
     )
+
+
+# =========================
+# LOCATION HELPERS
+# =========================
+@api_view(["GET"])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def pincode_lookup_view(request):
+    pincode = (request.query_params.get("pincode") or "").strip()
+    if not pincode or len(pincode) != 6:
+        return Response({"detail": "Valid 6-digit pincode required"}, status=400)
+
+    LOCAL_PINCODE_MAP = {
+        "563101": {"district": "Kolar", "state": "Karnataka"},
+    }
+
+    if pincode in LOCAL_PINCODE_MAP:
+        data = LOCAL_PINCODE_MAP[pincode]
+        return Response(
+            {"pincode": pincode, "district": data["district"], "state": data["state"]}
+        )
+
+    try:
+        resp = requests.get(
+            f"https://api.postalpincode.in/pincode/{pincode}",
+            timeout=5,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        if not data or data[0].get("Status") != "Success":
+            return Response({"detail": "Pincode not found"}, status=404)
+
+        po_list = data[0].get("PostOffice") or []
+        if not po_list:
+            return Response({"detail": "Pincode not found"}, status=404)
+
+        po = po_list[0]
+        district = po.get("District") or ""
+        state = po.get("State") or ""
+
+        if not district and not state:
+            return Response({"detail": "Pincode not found"}, status=404)
+
+        return Response({"pincode": pincode, "district": district, "state": state})
+    except Exception:
+        return Response({"detail": "Error while fetching pincode"}, status=500)
+
+
+@api_view(["GET"])
+@authentication_classes([TokenAuthentication])
+@permission_classes([IsAuthenticated])
+def reverse_geocode_view(request):
+    lat = request.query_params.get("lat")
+    lon = request.query_params.get("lon")
+
+    if not lat or not lon:
+        return Response(
+            {"detail": "lat and lon query params are required"},
+            status=400,
+        )
+
+    try:
+        resp = requests.get(
+            "https://nominatim.openstreetmap.org/reverse",
+            params={
+                "format": "json",
+                "lat": lat,
+                "lon": lon,
+                "zoom": 14,
+                "addressdetails": 1,
+            },
+            headers={"User-Agent": "AlphaFarmerApp/1.0"},
+            timeout=5,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        address = data.get("address") or {}
+
+        district = (
+            address.get("county")
+            or address.get("state_district")
+            or address.get("district")
+            or ""
+        )
+        state = address.get("state") or ""
+
+        if not district and not state:
+            return Response({"detail": "Location not clear"}, status=404)
+
+        return Response(
+            {
+                "lat": lat,
+                "lon": lon,
+                "district": district,
+                "state": state,
+                "raw": address,
+            }
+        )
+    except Exception:
+        return Response(
+            {"detail": "Error while reverse geocoding"},
+            status=500,
+        )

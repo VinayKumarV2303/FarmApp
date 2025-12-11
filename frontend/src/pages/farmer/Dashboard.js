@@ -52,10 +52,12 @@ const FarmerDashboard = () => {
       return bDate - aDate;
     });
 
-  const getImageForPost = (item) =>
-    item.image_url ||
-    item.image ||
-    "https://images.pexels.com/photos/2961120/pexels-photo-2961120.jpeg?auto=compress&cs=tinysrgb&w=1200";
+  const getImageForPost = (item) => {
+  if (item.image) return `${api.defaults.baseURL}${item.image}`;
+  if (item.image_url) return item.image_url;
+  if (item.photo_url) return item.photo_url; // in case your admin uses this field
+  return null;
+};
 
   const formatDateTime = (value) => {
     if (!value) return "";
@@ -254,14 +256,16 @@ const FarmerDashboard = () => {
                     }}
                   >
                     {getImageForPost(item) && (
-                      <CardMedia
-                        component="img"
-                        height="200"
-                        image={getImageForPost(item)}
-                        alt={item.title}
-                        loading="lazy"
-                      />
-                    )}
+  <CardMedia
+    component="img"
+    height="200"
+    image={getImageForPost(item)}
+    alt={item.title}
+    loading="lazy"
+    style={{ objectFit: "cover" }}
+  />
+)}
+
 
                     <CardContent>
                       <Typography

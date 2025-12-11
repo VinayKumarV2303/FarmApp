@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.utils import timezone
 
 
 class Farmer(models.Model):
@@ -108,39 +109,23 @@ class Land(models.Model):
 
 
 # 🔹 CLEAN NEWS MODEL (single definition)
+# farmer/models.py
+
+# farmer/models.py
 class News(models.Model):
-    STATUS_PENDING = "pending"
-    STATUS_APPROVED = "approved"
-    STATUS_REJECTED = "rejected"
-
-    STATUS_CHOICES = [
-        (STATUS_PENDING, "Pending"),
-        (STATUS_APPROVED, "Approved"),
-        (STATUS_REJECTED, "Rejected"),
-    ]
-
     title = models.CharField(max_length=255)
-    summary = models.CharField(max_length=500, blank=True)
-    content = models.TextField(blank=True)
-
-    # used for photo/image in admin UI
-    image_url = models.URLField(blank=True)
-    # optional external link
-    url = models.URLField(blank=True)
-
-    tags = models.CharField(max_length=255, blank=True)
-
-    is_important = models.BooleanField(default=False)
+    summary = models.TextField(blank=True, null=True)
+    content = models.TextField(blank=True, null=True)
+    image = models.ImageField(upload_to='news_photos/', blank=True, null=True)
+    image_url = models.URLField(blank=True, null=True)
+    url = models.URLField(blank=True, null=True)
     is_active = models.BooleanField(default=True)
+    is_important = models.BooleanField(default=False)
+    status = models.CharField(max_length=20, default='pending')
+    published_at = models.DateTimeField(default=timezone.now)
 
-    status = models.CharField(
-        max_length=10,
-        choices=STATUS_CHOICES,
-        default=STATUS_PENDING,
-    )
-
+    # NEW field — created_at
     created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.title

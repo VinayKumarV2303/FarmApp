@@ -65,7 +65,6 @@ const AdminLayout = ({ title = "Admin Panel", children }) => {
       <Box sx={{ p: 2 }}>
         <Typography variant="h6">Admin Console</Typography>
         <Typography variant="caption" color="text.secondary">
-          Farmer Platform
         </Typography>
       </Box>
       <Divider />

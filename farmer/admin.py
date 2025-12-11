@@ -1,6 +1,7 @@
 from django.contrib import admin
 from .models import Farmer, Land, News, CropPlan, CropAllocation, CropYieldConfig
-
+from django.utils.html import format_html
+from .models import News
 
 @admin.register(Farmer)
 class FarmerAdmin(admin.ModelAdmin):
@@ -14,8 +15,17 @@ class LandAdmin(admin.ModelAdmin):
 
 @admin.register(News)
 class NewsAdmin(admin.ModelAdmin):
-    list_display = ("title", "is_important", "created_at", "is_active")
+    list_display = ('title', 'published_at', 'is_active', 'status')
+    search_fields = ('title', 'summary', 'content')
+    list_filter = ('is_active', 'status', 'published_at')
+    readonly_fields = ('preview',)
+    fields = ('title', 'summary', 'content', 'image', 'image_url', 'preview', 'is_active', 'status', 'published_at')
 
+    def preview(self, obj):
+        if obj and obj.image:
+            return format_html('<img src="{}" style="max-height:200px; max-width:400px;" />', obj.image.url)
+        return "-"
+    preview.short_description = 'Image Preview'
 
 @admin.register(CropPlan)
 class CropPlanAdmin(admin.ModelAdmin):
